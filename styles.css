@@ -1,0 +1,331 @@
+/* TSG Biom Control — deep-blue BIOM identity, mobile first, no external assets. */
+
+:root {
+  --blue-950: #071c3f;
+  --blue-900: #0a2a5e;
+  --blue-800: #0b3d91;
+  --blue-600: #1663d9;
+  --blue-100: #dbe7fb;
+  --blue-50:  #eef3fd;
+  --ink:      #12233f;
+  --ink-soft: #43536e;
+  --line:     #d7e0ef;
+  --bg:       #f2f5fb;
+  --card:     #ffffff;
+  --green-bg: #e2f6e9;
+  --green-tx: #0d6e33;
+  --red-bg:   #fdeaea;
+  --red-tx:   #a11313;
+  --grey-bg:  #e8ecf3;
+  --grey-tx:  #43536e;
+  --radius:   14px;
+  --shadow:   0 1px 2px rgba(10, 42, 94, .06), 0 8px 24px rgba(10, 42, 94, .06);
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+/* ---------- Top bar ---------- */
+
+.topbar {
+  background: linear-gradient(135deg, var(--blue-950), var(--blue-800));
+  color: #fff;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  box-shadow: 0 2px 12px rgba(7, 28, 63, .35);
+}
+
+.topbar-inner {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 14px 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+
+.brand-mark {
+  flex: 0 0 auto;
+  width: 46px; height: 46px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .12);
+  border: 1px solid rgba(255, 255, 255, .35);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800; letter-spacing: .06em; font-size: 15px;
+}
+
+.brand-text h1 { margin: 0; font-size: 20px; line-height: 1.15; font-weight: 700; }
+.brand-text p { margin: 2px 0 0; font-size: 12.5px; color: var(--blue-100); }
+
+.topbar-actions {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+}
+
+.endpoint-chip {
+  font-size: 12px;
+  color: var(--blue-100);
+  border: 1px solid rgba(255, 255, 255, .35);
+  border-radius: 999px;
+  padding: 4px 10px;
+  max-width: 240px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.auto-toggle {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; color: #fff; cursor: pointer;
+  padding: 6px 4px;
+}
+.auto-toggle input { width: 17px; height: 17px; accent-color: var(--blue-600); }
+
+/* ---------- Buttons / forms ---------- */
+
+.btn {
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 9px 16px;
+  font-size: 14px; font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+.btn:disabled { opacity: .55; cursor: default; }
+.btn-primary { background: var(--blue-800); color: #fff; }
+.btn-primary:hover:not(:disabled) { background: var(--blue-600); }
+.btn-light { background: #fff; color: var(--blue-900); border-color: rgba(255,255,255,.6); }
+.btn-light:hover:not(:disabled) { background: var(--blue-50); }
+.btn-ghost { background: transparent; color: #fff; border-color: rgba(255,255,255,.45); }
+.btn-ghost:hover:not(:disabled) { background: rgba(255,255,255,.12); }
+.btn-block { width: 100%; padding: 12px 16px; font-size: 15px; }
+
+.field { display: block; margin-bottom: 14px; }
+.field > span {
+  display: block; font-size: 13px; font-weight: 600; color: var(--ink-soft);
+  margin-bottom: 6px;
+}
+.field input, .field select {
+  width: 100%;
+  padding: 11px 12px;
+  font-size: 15px; font-family: inherit;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.field input:focus, .field select:focus {
+  outline: 2px solid var(--blue-600); outline-offset: 1px; border-color: var(--blue-600);
+}
+
+.form-error {
+  background: var(--red-bg); color: var(--red-tx);
+  border-radius: 10px; padding: 10px 12px; font-size: 14px; margin: 0 0 14px;
+}
+
+/* ---------- Layout ---------- */
+
+.wrap { max-width: 1180px; margin: 0 auto; padding: 20px 16px 40px; }
+
+.setup-wrap { display: flex; justify-content: center; padding-top: 24px; }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 22px;
+}
+
+.setup-card { width: 100%; max-width: 460px; }
+.setup-card h2 { margin: 0 0 8px; font-size: 20px; }
+.muted { color: var(--ink-soft); font-size: 14.5px; margin: 0 0 18px; }
+.fineprint { color: var(--ink-soft); font-size: 12.5px; margin: 16px 0 0; }
+
+.section-title {
+  font-size: 15px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--blue-900); margin: 26px 0 12px;
+}
+section:first-of-type .section-title { margin-top: 6px; }
+
+/* ---------- Banners ---------- */
+
+.banner {
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between;
+}
+.banner p { margin: 0; font-size: 14.5px; }
+.banner-error { background: var(--red-bg); color: var(--red-tx); border: 1px solid #f3c2c2; }
+.banner-error .btn-light { color: var(--red-tx); border-color: #e5a3a3; }
+.banner-info { background: var(--blue-50); color: var(--blue-900); border: 1px solid var(--blue-100); }
+
+/* ---------- Stat cards ---------- */
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.stat {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px;
+}
+.stat .stat-label { font-size: 12.5px; font-weight: 600; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .05em; }
+.stat .stat-value { font-size: 30px; font-weight: 800; line-height: 1.1; margin-top: 6px; color: var(--blue-950); }
+.stat .stat-value.small { font-size: 16px; font-weight: 700; line-height: 1.3; }
+.stat .stat-sub { font-size: 12.5px; color: var(--ink-soft); margin-top: 4px; }
+
+/* ---------- Profiles ---------- */
+
+.profiles {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.profile-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 18px;
+}
+.profile-card h3 { margin: 0; font-size: 18px; }
+.profile-card .biom-id { color: var(--ink-soft); font-size: 13px; margin-top: 2px; word-break: break-all; }
+.profile-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; margin-top: 14px; }
+.profile-meta dt { font-size: 12px; font-weight: 600; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .04em; }
+.profile-meta dd { margin: 2px 0 0; font-size: 15px; font-weight: 600; }
+
+.empty-note {
+  background: var(--card);
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  padding: 18px;
+  color: var(--ink-soft);
+  font-size: 14.5px;
+  margin: 0;
+}
+
+/* ---------- Filters ---------- */
+
+.filter-bar {
+  display: flex; flex-wrap: wrap; gap: 12px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 14px 16px 2px;
+  margin-bottom: 12px;
+}
+.field-inline { flex: 1 1 150px; }
+.field-grow { flex: 2 1 200px; }
+
+.count-line { font-size: 13.5px; color: var(--ink-soft); margin: 0 0 8px; }
+
+/* ---------- Scans table ---------- */
+
+.table-wrap {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.scans-table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+.scans-table th {
+  text-align: left;
+  font-size: 12px; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--ink-soft);
+  background: var(--blue-50);
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.scans-table td {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+.scans-table tbody tr:last-child td { border-bottom: none; }
+.scans-table .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.scans-table .time { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.scans-table .profile-name { font-weight: 600; }
+.scans-table .profile-id { display: block; font-weight: 400; font-size: 12.5px; color: var(--ink-soft); word-break: break-all; }
+
+.badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12.5px; font-weight: 700;
+  white-space: nowrap;
+}
+.badge-verified { background: var(--green-bg); color: var(--green-tx); }
+.badge-denied { background: var(--red-bg); color: var(--red-tx); }
+.badge-other { background: var(--grey-bg); color: var(--grey-tx); }
+
+/* ---------- Footer ---------- */
+
+.foot { margin-top: 34px; }
+.foot p { font-size: 12.5px; color: var(--ink-soft); margin: 0; text-align: center; }
+
+/* ---------- Wider screens ---------- */
+
+@media (min-width: 640px) {
+  .stats { grid-template-columns: repeat(3, 1fr); }
+  .profiles { grid-template-columns: repeat(2, 1fr); }
+  .brand-text h1 { font-size: 22px; }
+}
+
+@media (min-width: 1024px) {
+  .stats { grid-template-columns: repeat(5, 1fr); }
+  .profiles { grid-template-columns: repeat(3, 1fr); }
+  .wrap { padding: 26px 20px 48px; }
+}
+
+/* ---------- Phone: table becomes stacked cards ---------- */
+
+@media (max-width: 719px) {
+  .scans-table thead { display: none; }
+  .scans-table, .scans-table tbody, .scans-table tr, .scans-table td { display: block; width: 100%; }
+  .scans-table tr {
+    padding: 10px 4px;
+    border-bottom: 1px solid var(--line);
+  }
+  .scans-table tbody tr:last-child { border-bottom: none; }
+  .scans-table td {
+    border-bottom: none;
+    padding: 4px 14px;
+    display: flex; justify-content: space-between; align-items: baseline; gap: 14px;
+    text-align: right;
+  }
+  .scans-table td::before {
+    content: attr(data-label);
+    font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+    color: var(--ink-soft);
+    text-align: left;
+    flex: 0 0 auto;
+  }
+  .scans-table .time { white-space: normal; }
+  .scans-table .profile-id { text-align: right; }
+  .endpoint-chip { display: none; }
+}

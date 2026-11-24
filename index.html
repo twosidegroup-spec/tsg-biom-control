@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TSG Biom Control — TwoSide Group</title>
+<meta name="description" content="Control dashboard for the TSG BIOM palm biometric system. Shows the scan records and palm banks your devices sync to your own TSG Biom API.">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">TSG</div>
+      <div class="brand-text">
+        <h1>TSG Biom Control</h1>
+        <p>TwoSide Group &middot; Palm Biometric Console</p>
+      </div>
+    </div>
+    <div class="topbar-actions" id="topbarActions" hidden>
+      <span class="endpoint-chip" id="endpointChip" title="Connected API endpoint"></span>
+      <label class="auto-toggle">
+        <input type="checkbox" id="autoRefreshToggle">
+        <span>Auto-refresh 30s</span>
+      </label>
+      <button type="button" class="btn btn-light" id="refreshBtn">Refresh</button>
+      <button type="button" class="btn btn-ghost" id="disconnectBtn">Disconnect</button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- ============ SETUP ============ -->
+  <section id="setupView" class="setup-wrap" hidden>
+    <div class="card setup-card">
+      <h2>Connect to your TSG Biom API</h2>
+      <p class="muted">
+        This dashboard reads the scan records and palm banks your phone syncs to your own
+        TSG Biom API. Enter the API endpoint and the <strong>read key</strong> you set on the server.
+      </p>
+      <form id="setupForm" autocomplete="off">
+        <label class="field">
+          <span>API endpoint</span>
+          <input type="url" id="endpointInput" value="https://tsg-biom-api.vercel.app"
+                 placeholder="https://tsg-biom-api.vercel.app" required spellcheck="false">
+        </label>
+        <label class="field">
+          <span>Read key</span>
+          <input type="password" id="readKeyInput" placeholder="Your READ_KEY" required spellcheck="false">
+        </label>
+        <p class="form-error" id="setupError" role="alert" hidden></p>
+        <button type="submit" class="btn btn-primary btn-block" id="connectBtn">Connect</button>
+      </form>
+      <p class="fineprint">
+        The endpoint and key are stored only in this browser (localStorage) and are sent
+        only to your API. Disconnect clears them. Palm template contents are never displayed here.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ MAIN ============ -->
+  <section id="mainView" hidden>
+
+    <div class="banner banner-error" id="errorBanner" role="alert" hidden>
+      <p id="errorText"></p>
+      <button type="button" class="btn btn-light" id="reenterBtn" hidden>Re-enter key</button>
+    </div>
+
+    <div class="banner banner-info" id="statusBanner" hidden>
+      <p id="statusText">Loading records&hellip;</p>
+    </div>
+
+    <!-- Overview -->
+    <section aria-labelledby="overviewHeading">
+      <h2 class="section-title" id="overviewHeading">Overview</h2>
+      <div class="stats" id="statsGrid"></div>
+    </section>
+
+    <!-- Profiles -->
+    <section aria-labelledby="profilesHeading">
+      <h2 class="section-title" id="profilesHeading">Enrolled palms</h2>
+      <div class="profiles" id="profilesGrid"></div>
+      <p class="empty-note" id="profilesEmpty" hidden>No palm profiles have synced yet. Profiles appear here after a device enrols a palm and syncs its bank.</p>
+    </section>
+
+    <!-- Scans -->
+    <section aria-labelledby="scansHeading">
+      <h2 class="section-title" id="scansHeading">Scan records</h2>
+
+      <div class="filter-bar">
+        <label class="field field-inline">
+          <span>Kind</span>
+          <select id="kindFilter"></select>
+        </label>
+        <label class="field field-inline">
+          <span>Result</span>
+          <select id="resultFilter">
+            <option value="">All results</option>
+            <option value="verified">Verified</option>
+            <option value="denied">Denied</option>
+            <option value="other">Other</option>
+          </select>
+        </label>
+        <label class="field field-inline field-grow">
+          <span>Search name or Biom ID</span>
+          <input type="search" id="searchInput" placeholder="Search&hellip;" spellcheck="false">
+        </label>
+      </div>
+
+      <p class="count-line" id="scanCountLine"></p>
+
+      <div class="table-wrap">
+        <table class="scans-table">
+          <thead>
+            <tr>
+              <th scope="col">Time (Dhaka)</th>
+              <th scope="col">Kind</th>
+              <th scope="col">Profile</th>
+              <th scope="col">Hand</th>
+              <th scope="col">EDCC</th>
+              <th scope="col">PalmNet</th>
+              <th scope="col">Result</th>
+              <th scope="col">Device</th>
+            </tr>
+          </thead>
+          <tbody id="scansBody"></tbody>
+        </table>
+      </div>
+      <p class="empty-note" id="scansEmpty" hidden>No scan records match. Records appear here after the phone syncs.</p>
+    </section>
+
+  </section>
+
+  <footer class="foot">
+    <p>TSG Biom Control &middot; Data comes only from your own TSG Biom API. Matching always happens on the device; this page only displays synced records.</p>
+  </footer>
+
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>
