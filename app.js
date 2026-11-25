@@ -1,10 +1,15 @@
 /* TSG Biom Control — dashboard logic.
  *
- * Reads scan records and palm-bank profiles from the owner's own
- * TSG Biom API (GET /api/scans, GET /api/profiles, header x-read-key)
- * and renders them. The endpoint + read key live only in this
- * browser's localStorage. No sample or placeholder data anywhere:
- * every number on the page comes from the API response.
+ * Reads scan records and palm-bank SUMMARIES from the owner's own
+ * TSG Biom API (GET /api/scans, GET /api/profiles?summary=1,
+ * header x-read-key) and renders them. Since v62 the dashboard
+ * never downloads full template banks just to show counts: the
+ * summary endpoint returns counts, bank versions, encryption
+ * state, owner device and tombstone flags only — no template
+ * strings cross the wire. The endpoint + read key live only in
+ * this browser's localStorage. No sample or placeholder data
+ * anywhere: every number on the page comes from the API
+ * response.
  *
  * The pure core (fetch, stats, filtering, HTML rendering) is kept
  * free of DOM access and exported as window.TsgBiomCore (and as a
@@ -98,7 +103,10 @@
       totalScans: scans.length,
       verified: verified,
       denied: denied,
-      profiles: profiles.length,
+      /* v62: tombstoned banks still arrive in the summary list
+         (they render as Removed cards) but they are not enrolled
+         profiles — the stat counts live banks only. */
+      profiles: profiles.filter(function (p) { return !(p && p.deleted === true); }).length,
       lastScanTs: last
     };
   }
@@ -144,8 +152,23 @@
 
   function renderProfilesHtml(profiles) {
     return profiles.map(function (p) {
-      var edccCount = Array.isArray(p.edccCodes) ? p.edccCodes.length : 0;
-      var embCount = Array.isArray(p.neuralEmbeddings) ? p.neuralEmbeddings.length : 0;
+      /* v62: profiles arrive as SUMMARIES (counts, not template
+         arrays). The array-length fallbacks keep an older API
+         response renderable, but the summary fields win. */
+      var edccCount = typeof p.edccCount === 'number' ? p.edccCount
+        : (Array.isArray(p.edccCodes) ? p.edccCodes.length : 0);
+      var embCount = typeof p.neuralCount === 'number' ? p.neuralCount
+        : (Array.isArray(p.neuralEmbeddings) ? p.neuralEmbeddings.length : 0);
+      if (p.deleted === true) {
+        return '<article class="profile-card profile-removed">' +
+          '<h3>Removed</h3>' +
+          '<div class="biom-id">' + esc(p.biomId || '') + '</div>' +
+          '<dl class="profile-meta">' +
+          '<div><dt>Status</dt><dd>Deleted (tombstone)</dd></div>' +
+          '<div><dt>Removed</dt><dd>' + esc(fmtDhaka(p.deletedTs)) + '</dd></div>' +
+          '<div><dt>Version</dt><dd>' + esc(typeof p.version === 'number' ? p.version : '—') + '</dd></div>' +
+          '</dl></article>';
+      }
       return '<article class="profile-card">' +
         '<h3>' + esc(p.name || 'Unnamed profile') + '</h3>' +
         '<div class="biom-id">' + esc(p.biomId || '') + '</div>' +
@@ -154,6 +177,9 @@
         '<div><dt>Model</dt><dd>' + esc(p.neuralModel || '—') + '</dd></div>' +
         '<div><dt>EDCC templates</dt><dd>' + edccCount + '</dd></div>' +
         '<div><dt>PalmNet embeddings</dt><dd>' + embCount + '</dd></div>' +
+        '<div><dt>Version</dt><dd>' + esc(typeof p.version === 'number' ? p.version : '—') + '</dd></div>' +
+        '<div><dt>Encryption</dt><dd>' + esc(p.enc === 'v1' ? 'Sealed (enc v1)' : 'Encoded') + '</dd></div>' +
+        '<div><dt>Owner device</dt><dd>' + esc(p.ownerDeviceId || '—') + '</dd></div>' +
         '<div><dt>Last updated</dt><dd>' + esc(fmtDhaka(p.updatedTs)) + '</dd></div>' +
         '</dl></article>';
     }).join('');
@@ -216,7 +242,9 @@
   function loadAll(endpoint, readKey, fetchFn) {
     return Promise.all([
       fetchJson(endpoint, readKey, '/api/scans', fetchFn),
-      fetchJson(endpoint, readKey, '/api/profiles', fetchFn)
+      /* v62 (Seat 1 Spec C5/D8/G5): summaries only — the full
+         bank list is never fetched by this dashboard. */
+      fetchJson(endpoint, readKey, '/api/profiles?summary=1', fetchFn)
     ]).then(function (r) {
       return {
         scans: Array.isArray(r[0].scans) ? r[0].scans : [],

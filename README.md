@@ -8,8 +8,10 @@ It shows, in one place, everything your devices sync to your own TSG Biom API:
   hand, EDCC score, PalmNet score, result badge and device label, with filters by kind and result
   plus a name / Biom ID search. Newest first.
 - **Enrolled palms** — one card per profile: name, Biom ID, hand, EDCC template count,
-  PalmNet embedding count, model stamp and last updated. Template and embedding *contents*
-  are never displayed — counts only.
+  PalmNet embedding count, model stamp, bank version, encryption state, owner device
+  and last updated. A bank deleted on a device (a tombstone) shows as a **Removed**
+  card with its deletion time, and the Overview count covers live banks only.
+  Template and embedding *contents* are never displayed — counts only.
 
 The page is a plain static site (`index.html`, `styles.css`, `app.js`). There is no build
 step and there are no external dependencies — no CDNs, no frameworks, nothing to install.
@@ -21,10 +23,14 @@ The dashboard reads two endpoints from the TSG Biom API
 (default `https://tsg-biom-api.vercel.app`):
 
 - `GET /api/scans` — the synced scan records
-- `GET /api/profiles` — the synced palm banks
+- `GET /api/profiles?summary=1` — the synced palm banks as SUMMARIES (v62)
 
 Both are called with the read key in the `x-read-key` header. The page contains no data
 of its own and never shows sample records: if the API returns nothing, the page says so.
+Since v62 the dashboard uses the summary endpoint on purpose: it receives counts,
+versions, encryption state, owner device and tombstone flags — never the template
+strings themselves — so opening the dashboard no longer downloads every full bank
+just to show counts.
 
 ## The read key
 
@@ -36,6 +42,14 @@ every read; it is *not* the device key the phone uses to write).
 - It is stored only in that browser's `localStorage`, alongside the endpoint, and is
   sent only to the API as the `x-read-key` header.
 - **Disconnect** (top right) clears both values from the browser.
+- One honest note on storage: this dashboard and the BIOM app are served from the
+  SAME origin (`twosidegroup-spec.github.io`), and browsers scope `localStorage`
+  per origin, not per page — so the two apps' stored values coexist in one
+  origin-wide store. The dashboard's keys are namespaced (`tsgBiomControl.*`) and
+  the app's are too, so neither reads the other's values; but a browser-level
+  "clear site data" for the origin would clear BOTH, including the app's
+  enrolments. Never clear site data for this origin — the app's own Delete All
+  Data is the only erase, and it is deliberate.
 - If the API refuses the key (HTTP 401), the dashboard says the key was refused and
   offers to re-enter it — it never retries silently with a different key.
 
@@ -56,6 +70,12 @@ The dashboard is designed to sit on the same GitHub Pages origin as the BIOM app
 5. Open it, enter the endpoint and your read key, and connect.
 
 ## Local check
+
+```sh
+npm test   # headless proof of the data path (summary fetch, rendering, stats)
+```
+
+Serve the folder with any static server, for example:
 
 Serve the folder with any static server, for example:
 
