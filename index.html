@@ -25,6 +25,7 @@
         <span>Auto-refresh 30s</span>
       </label>
       <button type="button" class="btn btn-light" id="refreshBtn">Refresh</button>
+      <button type="button" class="btn btn-ghost" id="lockBtn">Lock</button>
       <button type="button" class="btn btn-ghost" id="disconnectBtn">Disconnect</button>
     </div>
   </div>
@@ -32,30 +33,69 @@
 
 <main class="wrap">
 
+  <!-- ============ LOCK (v63: password-only) ============ -->
+  <section id="lockView" class="setup-wrap" hidden>
+    <div class="card setup-card">
+      <h2>Locked</h2>
+      <p class="muted">
+        This dashboard is locked. Enter your dashboard password to unlock it —
+        nothing is loaded from the API until it opens.
+      </p>
+      <form id="lockForm" autocomplete="off">
+        <label class="field">
+          <span>Password</span>
+          <input type="password" id="lockPasswordInput" placeholder="Your dashboard password" required spellcheck="false">
+        </label>
+        <p class="form-error" id="lockError" role="alert" hidden></p>
+        <button type="submit" class="btn btn-primary btn-block" id="unlockBtn">Unlock</button>
+      </form>
+      <p class="fineprint">
+        The read key on this browser is stored sealed — encrypted under your password —
+        never in plain text. <button type="button" class="linklike" id="lockResetBtn">Forget the sealed key on this browser</button>
+      </p>
+    </div>
+  </section>
+
   <!-- ============ SETUP ============ -->
   <section id="setupView" class="setup-wrap" hidden>
     <div class="card setup-card">
-      <h2>Connect to your TSG Biom API</h2>
-      <p class="muted">
+      <h2 id="setupHeading">Connect to your TSG Biom API</h2>
+      <p class="muted" id="setupIntroFresh">
         This dashboard reads the scan records and palm banks your phone syncs to your own
-        TSG Biom API. Enter the API endpoint and the <strong>read key</strong> you set on the server.
+        TSG Biom API. Enter the API endpoint and the <strong>read key</strong> you set on the server,
+        and choose the <strong>dashboard password</strong> that will protect them on this browser.
+        This is a one-time setup — every later visit asks only for the password.
+      </p>
+      <p class="muted" id="setupIntroMigrate" hidden>
+        This browser already holds your read key from an earlier version, stored in plain text.
+        Set your <strong>dashboard password</strong> now and the key is sealed under it — the
+        plain-text copy is deleted, and every later visit asks only for the password.
       </p>
       <form id="setupForm" autocomplete="off">
-        <label class="field">
+        <label class="field" id="fieldEndpointWrap">
           <span>API endpoint</span>
           <input type="url" id="endpointInput" value="https://tsg-biom-api.vercel.app"
                  placeholder="https://tsg-biom-api.vercel.app" required spellcheck="false">
         </label>
-        <label class="field">
+        <label class="field" id="fieldKeyWrap">
           <span>Read key</span>
           <input type="password" id="readKeyInput" placeholder="Your READ_KEY" required spellcheck="false">
+        </label>
+        <label class="field">
+          <span>Dashboard password</span>
+          <input type="password" id="passwordInput" placeholder="The password for this dashboard" required spellcheck="false">
+        </label>
+        <label class="field">
+          <span>Repeat the password</span>
+          <input type="password" id="passwordConfirmInput" placeholder="Type it again" required spellcheck="false">
         </label>
         <p class="form-error" id="setupError" role="alert" hidden></p>
         <button type="submit" class="btn btn-primary btn-block" id="connectBtn">Connect</button>
       </form>
       <p class="fineprint">
-        The endpoint and key are stored only in this browser (localStorage) and are sent
-        only to your API. Disconnect clears them. Palm template contents are never displayed here.
+        The endpoint and key are stored only in this browser, sealed — encrypted under your
+        dashboard password (AES-GCM, PBKDF2) — never in plain text, and sent only to your API.
+        Disconnect clears them. Palm template contents are never displayed here.
       </p>
     </div>
   </section>

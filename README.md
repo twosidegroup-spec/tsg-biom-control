@@ -32,28 +32,41 @@ versions, encryption state, owner device and tombstone flags — never the templ
 strings themselves — so opening the dashboard no longer downloads every full bank
 just to show counts.
 
-## The read key
+## The read key and the dashboard password (v63)
 
-On first open, the dashboard asks for the API endpoint and the **read key** — the
-`READ_KEY` value set in the API server's environment (the same key the API checks on
-every read; it is *not* the device key the phone uses to write).
+Login is **password-only**. On first open, the dashboard asks once for the API
+endpoint and the **read key** — the `READ_KEY` value set in the API server's
+environment (the same key the API checks on every read; it is *not* the device
+key the phone uses to write) — and for the **dashboard password** the owner
+chooses. From then on, every visit asks only for the password.
 
-- The owner types the key into the page in their own browser.
-- It is stored only in that browser's `localStorage`, alongside the endpoint, and is
-  sent only to the API as the `x-read-key` header.
-- **Disconnect** (top right) clears both values from the browser.
-- One honest note on storage: this dashboard and the BIOM app are served from the
-  SAME origin (`twosidegroup-spec.github.io`), and browsers scope `localStorage`
-  per origin, not per page — so the two apps' stored values coexist in one
-  origin-wide store. The dashboard's keys are namespaced (`tsgBiomControl.*`) and
-  the app's are too, so neither reads the other's values; but a browser-level
-  "clear site data" for the origin would clear BOTH, including the app's
-  enrolments. Never clear site data for this origin — the app's own Delete All
-  Data is the only erase, and it is deliberate.
-- If the API refuses the key (HTTP 401), the dashboard says the key was refused and
-  offers to re-enter it — it never retries silently with a different key.
+- The owner types the key into the page in their own browser, once.
+- The endpoint + key are stored in that browser's `localStorage` **sealed** —
+  AES-GCM-256 under a key derived from the dashboard password with
+  PBKDF2-SHA-256 (600,000 iterations, random salt, fresh IV per seal). They are
+  never stored in plain text (this closes the pre-v63 note that used to stand
+  here). The password itself is stored nowhere: a correct password is simply
+  one whose derived key opens the seal.
+- Until the password unlocks the seal, the page makes **no API call at all**;
+  a wrong password stays on the lock screen with an honest message. **Lock**
+  (top right) re-locks without forgetting; **Disconnect** clears the sealed
+  record from the browser entirely.
+- A browser that still holds the pre-v63 plaintext key is migrated on its next
+  visit: set the password once, the key is sealed, and the plaintext entries
+  are deleted.
+- One honest note on storage: this dashboard and the BIOM app are served from
+  the SAME origin (`twosidegroup-spec.github.io`), and browsers scope
+  `localStorage` per origin, not per page — so the two apps' stored values
+  coexist in one origin-wide store. The dashboard's keys are namespaced
+  (`tsgBiomControl.*`) and the app's are too, so neither reads the other's
+  values; but a browser-level "clear site data" for the origin would clear
+  BOTH, including the app's enrolments. Never clear site data for this
+  origin — the app's own Delete All Data is the only erase, and it is
+  deliberate.
+- If the API refuses the key (HTTP 401), the dashboard says the key was refused
+  and offers to re-enter it — it never retries silently with a different key.
 
-Anyone who opens the page without the key sees only the connect form.
+Anyone who opens the page without the password sees only the lock screen.
 
 ## Going live (GitHub Pages)
 

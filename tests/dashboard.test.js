@@ -1,4 +1,5 @@
-/* TSG Biom Control — dashboard checks (v62: the summary switch).
+/* TSG Biom Control — dashboard checks (v62: the summary switch;
+   v63: the password-only login).
 
    Proves, headlessly against the exact Core the page ships:
    - loadAll fetches profiles ONLY from the summary endpoint
@@ -10,7 +11,14 @@
    - a tombstoned bank renders as a Removed card with its
      deletion time, and the Enrolled profiles stat counts live
      banks only;
-   - the read key rides the header and appears in no URL.
+   - the read key rides the header and appears in no URL;
+   - v63: the credential seal round-trips under a password
+     (AES-GCM / PBKDF2), a wrong password is refused, the sealed
+     record holds no readable credential, the shipped wiring
+     keeps credentials in memory only (no plaintext write path
+     remains), and the lock screen gates the data — the page
+     markup carries a password-only lock form and the wiring
+     fetches only behind the in-memory session credentials.
    Run: npm test */
 'use strict';
 const fs = require('fs');
@@ -69,6 +77,53 @@ async function main() {
   const src = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
   check('SOURCE the dashboard never fetches the bare full-bank list',
     src.indexOf("'/api/profiles'") === -1 && src.indexOf("'/api/profiles?summary=1'") !== -1);
+
+  /* ---------- v63: the password seal ---------- */
+  const TEST_PASSWORD = 'test-password-63';
+  const creds = { endpoint: 'https://api.test', readKey: 'read-key-xyz-123' };
+  const sealed = await Core.sealCredentials(TEST_PASSWORD, creds);
+  check('SEAL the sealed record is versioned base64 parts, PBKDF2 at 600k iterations',
+    sealed.v === 1 && sealed.iter === 600000 && typeof sealed.salt === 'string' &&
+    typeof sealed.iv === 'string' && typeof sealed.ct === 'string');
+  check('SEAL the sealed record holds NO readable credential',
+    JSON.stringify(sealed).indexOf(creds.readKey) === -1 &&
+    JSON.stringify(sealed).indexOf(creds.endpoint) === -1 &&
+    Buffer.from(sealed.ct, 'base64').toString('utf8').indexOf(creds.readKey) === -1);
+  const opened = await Core.unsealCredentials(TEST_PASSWORD, sealed);
+  check('SEAL the correct password opens the seal and returns the credentials',
+    opened.endpoint === creds.endpoint && opened.readKey === creds.readKey);
+  let wrongRejected = false;
+  try { await Core.unsealCredentials('not-the-password', sealed); } catch (e) { wrongRejected = true; }
+  check('SEAL a wrong password is refused (the seal integrity check fails, nothing opens)',
+    wrongRejected);
+  const sealed2 = await Core.sealCredentials(TEST_PASSWORD, creds);
+  check('SEAL every seal is fresh (random salt/IV — two seals of one key differ)',
+    sealed2.ct !== sealed.ct && sealed2.salt !== sealed.salt);
+
+  /* ---------- v63: the lock gate in the shipped wiring ---------- */
+  const pageHtml = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const lockSlice = pageHtml.slice(pageHtml.indexOf('id="lockView"'), pageHtml.indexOf('id="setupView"'));
+  check('LOCK the lock screen asks ONLY for the password (no read-key or endpoint field)',
+    lockSlice.indexOf('id="lockPasswordInput"') !== -1 && lockSlice.indexOf('type="password"') !== -1 &&
+    lockSlice.indexOf('readKeyInput') === -1 && lockSlice.indexOf('endpointInput') === -1);
+  check('LOCK credentials live in memory only — refresh is gated on the session credentials',
+    src.indexOf('var sessionCreds = null;') !== -1 &&
+    src.indexOf('var creds = sessionCreds;') !== -1 &&
+    src.indexOf('if (!creds || state.loading) return Promise.resolve();') !== -1);
+  check('LOCK a sealed browser boots to the lock screen before any fetch path runs',
+    src.indexOf('if (storedSealed()) {') !== -1 && src.indexOf('showLock(null);') !== -1);
+  check('LOCK no plaintext write path remains: the read key is never setItem-ed, only the sealed record is',
+    src.indexOf('setItem(LS_READ_KEY') === -1 && src.indexOf('setItem(LS_ENDPOINT') === -1 &&
+    src.indexOf('setItem(LS_SEALED') !== -1 && src.indexOf("var LS_SEALED = 'tsgBiomControl.sealed';") !== -1);
+  check('LOCK the legacy plaintext entries are removed once the seal is written (migration)',
+    src.indexOf('removeItem(LS_READ_KEY)') !== -1 && src.indexOf("setupMode === 'migrate'") !== -1);
+  check('LOCK no credential or password literal is embedded in the shipped files',
+    src.indexOf('read-key-xyz-123') === -1 && pageHtml.indexOf('read-key-xyz-123') === -1 &&
+    !/(^|[^A-Z_])READ_KEY\s*=\s*['"][^'"]+['"]/.test(src) &&
+    /* the password is verified by the seal, never compared
+       against a literal in the code */
+    src.indexOf('password ===') === -1 && src.indexOf('value === \'') === -1 &&
+    src.indexOf('Core.unsealCredentials(') !== -1);
 
   console.log('\n' + (fail === 0 ? 'ALL DASHBOARD TESTS PASSED (' + pass + ')' : fail + ' FAILURES, ' + pass + ' passed'));
   process.exit(fail === 0 ? 0 : 1);

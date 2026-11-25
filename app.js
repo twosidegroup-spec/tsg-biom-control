@@ -6,21 +6,34 @@
  * never downloads full template banks just to show counts: the
  * summary endpoint returns counts, bank versions, encryption
  * state, owner device and tombstone flags only — no template
- * strings cross the wire. The endpoint + read key live only in
- * this browser's localStorage. No sample or placeholder data
+ * strings cross the wire. No sample or placeholder data
  * anywhere: every number on the page comes from the API
  * response.
  *
- * The pure core (fetch, stats, filtering, HTML rendering) is kept
- * free of DOM access and exported as window.TsgBiomCore (and as a
- * Node module when loaded outside a browser) so the exact data path
- * shipped to the page can be exercised headlessly. */
+ * Login (v63): password-only. The endpoint + read key are kept
+ * in this browser SEALED — AES-GCM under a key derived from the
+ * dashboard password with PBKDF2-SHA-256 (600,000 iterations) —
+ * never in plain text at rest, and the password itself is never
+ * stored anywhere: a correct password is simply one whose
+ * derived key opens the seal (the GCM tag is the check). First
+ * run asks for the read key once and seals it under the
+ * password; every later visit asks only for the password, and
+ * no API call is made before it unlocks. A browser that still
+ * holds the pre-v63 plaintext key is migrated: set the password
+ * once, the key is sealed, the plaintext is deleted.
+ *
+ * The pure core (fetch, stats, filtering, HTML rendering, and
+ * the seal/unseal crypto) is kept free of DOM access and
+ * exported as window.TsgBiomCore (and as a Node module when
+ * loaded outside a browser) so the exact data path shipped to
+ * the page can be exercised headlessly. */
 (function () {
   'use strict';
 
   var DEFAULT_ENDPOINT = 'https://tsg-biom-api.vercel.app';
   var LS_ENDPOINT = 'tsgBiomControl.endpoint';
   var LS_READ_KEY = 'tsgBiomControl.readKey';
+  var LS_SEALED = 'tsgBiomControl.sealed';
 
   var KIND_LABELS = {
     'enrol': 'Enrolment',
@@ -31,7 +44,8 @@
     'topup': 'Top-up',
     're-register': 'Re-register',
     'delete-all': 'Delete all',
-    'field-test': 'Field test'
+    'field-test': 'Field test',
+    'owner-unlock': 'Owner unlock'
   };
 
   /* ---------------- helpers ---------------- */
@@ -253,8 +267,82 @@
     });
   }
 
+  /* ---------------- credential seal (v63) -----------------------
+     AES-GCM-256 under a PBKDF2-SHA-256 key derived from the
+     dashboard password (600,000 iterations, random 16-byte salt,
+     fresh 12-byte IV per seal). The sealed record is plain JSON
+     of base64 parts — it contains no readable credential, and
+     the password is never stored: unsealing with a wrong
+     password fails the GCM tag check and rejects. */
+
+  var PBKDF2_ITERATIONS = 600000;
+
+  function bytesToB64(bytes) {
+    if (typeof Buffer !== 'undefined') return Buffer.from(bytes).toString('base64');
+    var s = '';
+    for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return btoa(s);
+  }
+
+  function b64ToBytes(str) {
+    if (typeof Buffer !== 'undefined') return new Uint8Array(Buffer.from(String(str), 'base64'));
+    var bin = atob(String(str));
+    var out = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
+  function subtleCrypto() {
+    return (typeof crypto !== 'undefined' && crypto.subtle) ? crypto.subtle : null;
+  }
+
+  function deriveSealKey(subtle, password, salt, iterations) {
+    return subtle.importKey('raw', new TextEncoder().encode(String(password)), 'PBKDF2', false, ['deriveKey'])
+      .then(function (base) {
+        return subtle.deriveKey(
+          { name: 'PBKDF2', salt: salt, iterations: iterations, hash: 'SHA-256' },
+          base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+      });
+  }
+
+  function sealCredentials(password, creds) {
+    var subtle = subtleCrypto();
+    if (!subtle) return Promise.reject(new Error('WebCrypto is not available in this browser'));
+    var salt = crypto.getRandomValues(new Uint8Array(16));
+    var iv = crypto.getRandomValues(new Uint8Array(12));
+    return deriveSealKey(subtle, password, salt, PBKDF2_ITERATIONS).then(function (key) {
+      var payload = JSON.stringify({ endpoint: creds.endpoint, readKey: creds.readKey });
+      return subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, new TextEncoder().encode(payload));
+    }).then(function (ct) {
+      return {
+        v: 1, iter: PBKDF2_ITERATIONS,
+        salt: bytesToB64(salt), iv: bytesToB64(iv), ct: bytesToB64(new Uint8Array(ct))
+      };
+    });
+  }
+
+  function unsealCredentials(password, sealed) {
+    var subtle = subtleCrypto();
+    if (!subtle) return Promise.reject(new Error('WebCrypto is not available in this browser'));
+    if (!sealed || sealed.v !== 1 || !sealed.salt || !sealed.iv || !sealed.ct) {
+      return Promise.reject(new Error('No sealed credential on this browser'));
+    }
+    return deriveSealKey(subtle, password, b64ToBytes(sealed.salt), sealed.iter || PBKDF2_ITERATIONS)
+      .then(function (key) {
+        return subtle.decrypt({ name: 'AES-GCM', iv: b64ToBytes(sealed.iv) }, key, b64ToBytes(sealed.ct));
+      })
+      .then(function (pt) {
+        var obj = JSON.parse(new TextDecoder().decode(pt));
+        if (!obj || !obj.readKey) throw new Error('Sealed credential is incomplete');
+        return { endpoint: obj.endpoint || DEFAULT_ENDPOINT, readKey: obj.readKey };
+      });
+  }
+
   var Core = {
     DEFAULT_ENDPOINT: DEFAULT_ENDPOINT,
+    PBKDF2_ITERATIONS: PBKDF2_ITERATIONS,
+    sealCredentials: sealCredentials,
+    unsealCredentials: unsealCredentials,
     esc: esc,
     fmtScore: fmtScore,
     fmtDhaka: fmtDhaka,
@@ -281,10 +369,33 @@
 
   var els = {};
   var state = { scans: [], profiles: [], loading: false, timer: null };
+  /* v63: the unsealed credentials live ONLY in this variable —
+     memory, never storage. Locked means null, and refresh()
+     does nothing while locked, so no API call can happen
+     before the password unlocks the seal. */
+  var sessionCreds = null;
+  var setupMode = 'fresh'; // 'fresh' | 'migrate' (pre-v63 plaintext key found)
 
   function $(id) { return document.getElementById(id); }
 
-  function storedCreds() {
+  function storedSealed() {
+    try {
+      var raw = window.localStorage.getItem(LS_SEALED);
+      if (!raw) return null;
+      var obj = JSON.parse(raw);
+      return obj && obj.v === 1 ? obj : null;
+    } catch (e) { /* storage unavailable */ }
+    return null;
+  }
+
+  function saveSealed(sealed) {
+    try { window.localStorage.setItem(LS_SEALED, JSON.stringify(sealed)); } catch (e) { /* storage unavailable */ }
+  }
+
+  /* Pre-v63 browsers hold the key in plain text. It is read
+     ONLY to migrate it into the seal, and deleted the moment
+     the seal is written. Nothing new is ever written there. */
+  function legacyCreds() {
     try {
       var endpoint = window.localStorage.getItem(LS_ENDPOINT);
       var key = window.localStorage.getItem(LS_READ_KEY);
@@ -293,25 +404,31 @@
     return null;
   }
 
-  function saveCreds(endpoint, readKey) {
+  function clearStored() {
     try {
-      window.localStorage.setItem(LS_ENDPOINT, endpoint);
-      window.localStorage.setItem(LS_READ_KEY, readKey);
-    } catch (e) { /* storage unavailable */ }
-  }
-
-  function clearCreds() {
-    try {
+      window.localStorage.removeItem(LS_SEALED);
       window.localStorage.removeItem(LS_ENDPOINT);
       window.localStorage.removeItem(LS_READ_KEY);
     } catch (e) { /* storage unavailable */ }
   }
 
-  function showSetup(message) {
+  function showSetup(message, mode) {
     stopAutoRefresh();
+    setupMode = mode || 'fresh';
+    els.lockView.hidden = true;
     els.setupView.hidden = false;
     els.mainView.hidden = true;
     els.topbarActions.hidden = true;
+    var migrate = setupMode === 'migrate';
+    els.fieldEndpointWrap.hidden = migrate;
+    els.fieldKeyWrap.hidden = migrate;
+    /* hidden fields must not block the form's validation */
+    els.endpointInput.required = !migrate;
+    els.readKeyInput.required = !migrate;
+    els.setupIntroFresh.hidden = migrate;
+    els.setupIntroMigrate.hidden = !migrate;
+    els.setupHeading.textContent = migrate ? 'Protect this browser with your password' : 'Connect to your TSG Biom API';
+    els.connectBtn.textContent = migrate ? 'Seal the key and continue' : 'Connect';
     if (message) {
       els.setupError.textContent = message;
       els.setupError.hidden = false;
@@ -320,20 +437,35 @@
     }
   }
 
+  function showLock(message) {
+    stopAutoRefresh();
+    els.setupView.hidden = true;
+    els.mainView.hidden = true;
+    els.topbarActions.hidden = true;
+    els.lockView.hidden = false;
+    els.lockPasswordInput.value = '';
+    if (message) {
+      els.lockError.textContent = message;
+      els.lockError.hidden = false;
+    } else {
+      els.lockError.hidden = true;
+    }
+  }
+
   function showMain() {
     els.setupView.hidden = true;
+    els.lockView.hidden = true;
     els.mainView.hidden = false;
     els.topbarActions.hidden = false;
-    var creds = storedCreds();
-    els.endpointChip.textContent = creds ? creds.endpoint : '';
+    els.endpointChip.textContent = sessionCreds ? sessionCreds.endpoint : '';
   }
 
   function showError(err) {
-    var creds = storedCreds();
+    var creds = sessionCreds;
     els.statusBanner.hidden = true;
     if (err && err.status === 401) {
       els.errorText.textContent = 'The read key was refused by the API (unauthorised). ' +
-        'The key stored in this browser does not match the READ_KEY on the server.';
+        'The key sealed in this browser does not match the READ_KEY on the server.';
       els.reenterBtn.hidden = false;
     } else if (err && err.status) {
       els.errorText.textContent = 'The API answered with an error (HTTP ' + err.status + '). ' +
@@ -374,7 +506,7 @@
   }
 
   function refresh() {
-    var creds = storedCreds();
+    var creds = sessionCreds;
     if (!creds || state.loading) return Promise.resolve();
     state.loading = true;
     els.refreshBtn.disabled = true;
@@ -412,42 +544,98 @@
   }
 
   function disconnect() {
-    clearCreds();
+    sessionCreds = null;
+    clearStored();
     state.scans = [];
     state.profiles = [];
     els.readKeyInput.value = '';
-    showSetup(null);
+    els.passwordInput.value = '';
+    els.passwordConfirmInput.value = '';
+    showSetup(null, 'fresh');
+  }
+
+  function lock() {
+    sessionCreds = null;
+    state.scans = [];
+    state.profiles = [];
+    showLock(null);
   }
 
   function init() {
-    ['setupView', 'mainView', 'topbarActions', 'endpointChip', 'setupForm', 'endpointInput',
-     'readKeyInput', 'setupError', 'connectBtn', 'errorBanner', 'errorText', 'reenterBtn',
+    ['setupView', 'lockView', 'mainView', 'topbarActions', 'endpointChip', 'setupForm', 'endpointInput',
+     'readKeyInput', 'passwordInput', 'passwordConfirmInput', 'setupError', 'connectBtn',
+     'setupHeading', 'setupIntroFresh', 'setupIntroMigrate', 'fieldEndpointWrap', 'fieldKeyWrap',
+     'lockForm', 'lockPasswordInput', 'lockError', 'unlockBtn', 'lockResetBtn',
+     'errorBanner', 'errorText', 'reenterBtn',
      'statusBanner', 'statusText', 'statsGrid', 'profilesGrid', 'profilesEmpty',
      'kindFilter', 'resultFilter', 'searchInput', 'scanCountLine', 'scansBody',
-     'scansEmpty', 'refreshBtn', 'disconnectBtn', 'autoRefreshToggle'
+     'scansEmpty', 'refreshBtn', 'disconnectBtn', 'lockBtn', 'autoRefreshToggle'
     ].forEach(function (id) { els[id] = $(id); });
 
     els.setupForm.addEventListener('submit', function (ev) {
       ev.preventDefault();
-      var endpoint = els.endpointInput.value.trim() || DEFAULT_ENDPOINT;
-      var readKey = els.readKeyInput.value.trim();
-      if (!readKey) return;
+      var password = els.passwordInput.value;
+      var confirm = els.passwordConfirmInput.value;
+      if (!password) {
+        els.setupError.textContent = 'Set the dashboard password — it seals the read key on this browser.';
+        els.setupError.hidden = false;
+        return;
+      }
+      if (password !== confirm) {
+        els.setupError.textContent = 'The two passwords do not match. Type the same password in both boxes.';
+        els.setupError.hidden = false;
+        return;
+      }
       els.connectBtn.disabled = true;
       els.setupError.hidden = true;
+
+      var finishSetup = function (creds) {
+        return Core.sealCredentials(password, creds).then(function (sealed) {
+          saveSealed(sealed);
+          /* the plaintext legacy entries (if any) die the
+             moment the seal exists */
+          try {
+            window.localStorage.removeItem(LS_ENDPOINT);
+            window.localStorage.removeItem(LS_READ_KEY);
+          } catch (e) { /* storage unavailable */ }
+          sessionCreds = creds;
+          els.passwordInput.value = '';
+          els.passwordConfirmInput.value = '';
+          showMain();
+        });
+      };
+
+      if (setupMode === 'migrate') {
+        var legacy = legacyCreds();
+        if (!legacy) { showSetup(null, 'fresh'); els.connectBtn.disabled = false; return; }
+        finishSetup(legacy)
+          .then(function () { refresh(); })
+          .catch(function () {
+            els.setupError.textContent = 'Could not seal the key in this browser. Try again.';
+            els.setupError.hidden = false;
+          })
+          .then(function () { els.connectBtn.disabled = false; });
+        return;
+      }
+
+      var endpoint = els.endpointInput.value.trim() || DEFAULT_ENDPOINT;
+      var readKey = els.readKeyInput.value.trim();
+      if (!readKey) { els.connectBtn.disabled = false; return; }
       Core.loadAll(endpoint, readKey)
         .then(function (data) {
-          saveCreds(endpoint, readKey);
           state.scans = data.scans;
           state.profiles = data.profiles;
-          showMain();
-          renderAll();
+          return finishSetup({ endpoint: endpoint, readKey: readKey });
         })
+        .then(function () { renderAll(); })
         .catch(function (err) {
           if (err && err.status === 401) {
             els.setupError.textContent = 'The read key was refused by the API (unauthorised). ' +
               'Check that you entered the READ_KEY set on the server, then try again.';
           } else if (err && err.status) {
             els.setupError.textContent = 'The API answered with an error (HTTP ' + err.status + '). Check the endpoint and try again.';
+          } else if (err && err.message && err.message.indexOf('Seal') !== -1) {
+            els.setupError.textContent = 'Could not seal the key in this browser. Try again.';
           } else {
             els.setupError.textContent = 'Could not reach the API at ' + endpoint + '. Check the address and your connection, then try again.';
           }
@@ -456,8 +644,48 @@
         .then(function () { els.connectBtn.disabled = false; });
     });
 
+    els.lockForm.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      var sealed = storedSealed();
+      if (!sealed) { showSetup(null, 'fresh'); return; }
+      els.unlockBtn.disabled = true;
+      els.lockError.hidden = true;
+      Core.unsealCredentials(els.lockPasswordInput.value, sealed)
+        .then(function (creds) {
+          sessionCreds = creds;
+          showMain();
+          refresh();
+        })
+        .catch(function () {
+          /* a wrong password fails the seal's integrity check —
+             the dashboard stays locked and nothing was fetched */
+          els.lockError.textContent = 'That password did not unlock this dashboard. Check it and try again.';
+          els.lockError.hidden = false;
+        })
+        .then(function () { els.unlockBtn.disabled = false; });
+    });
+
+    var resetArmed = false;
+    els.lockResetBtn.addEventListener('click', function () {
+      if (!resetArmed) {
+        resetArmed = true;
+        els.lockResetBtn.textContent = 'Tap again to forget the sealed key on this browser';
+        window.setTimeout(function () {
+          resetArmed = false;
+          els.lockResetBtn.textContent = 'Forget the sealed key on this browser';
+        }, 4000);
+        return;
+      }
+      resetArmed = false;
+      els.lockResetBtn.textContent = 'Forget the sealed key on this browser';
+      sessionCreds = null;
+      clearStored();
+      showSetup(null, 'fresh');
+    });
+
     els.refreshBtn.addEventListener('click', refresh);
     els.disconnectBtn.addEventListener('click', disconnect);
+    els.lockBtn.addEventListener('click', lock);
     els.reenterBtn.addEventListener('click', disconnect);
     els.autoRefreshToggle.addEventListener('change', function () {
       if (els.autoRefreshToggle.checked) { startAutoRefresh(); refresh(); }
@@ -468,13 +696,16 @@
     });
     els.searchInput.addEventListener('input', renderAll);
 
-    var creds = storedCreds();
-    if (creds) {
-      els.endpointInput.value = creds.endpoint;
-      showMain();
-      refresh();
+    /* v63 entry rule: a sealed browser goes to the LOCK screen
+       and fetches nothing until the password unlocks it; a
+       pre-v63 plaintext browser goes to the one-time migration;
+       a new browser goes to first-run setup. */
+    if (storedSealed()) {
+      showLock(null);
+    } else if (legacyCreds()) {
+      showSetup(null, 'migrate');
     } else {
-      showSetup(null);
+      showSetup(null, 'fresh');
     }
   }
 
