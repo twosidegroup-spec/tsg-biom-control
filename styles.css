@@ -244,7 +244,8 @@ section:first-of-type .section-title { margin-top: 6px; }
 
 /* ---------- Overview panels ---------- */
 
-.overview-panels { display: grid; grid-template-columns: 1fr; gap: var(--space-3); margin-top: var(--space-3); }
+.overview-panels { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-3); margin-top: var(--space-3); }
+.panel { min-width: 0; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-3); }
 .panel-head h3 { margin: 0; font-size: var(--type-heading); font-weight: 600; }
 .table-wrap-plain { border: none; border-radius: 0; }
@@ -303,7 +304,8 @@ section:first-of-type .section-title { margin-top: 6px; }
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 .scans-table { width: 100%; border-collapse: collapse; font-size: var(--type-body); }
 .scans-table th {
@@ -420,7 +422,7 @@ section:first-of-type .section-title { margin-top: 6px; }
   .shell-content { flex: 1 1 auto; }
   .wrap { padding: 26px 20px 48px; }
   .stats { grid-template-columns: repeat(5, 1fr); }
-  .overview-panels { grid-template-columns: 7fr 5fr; }
+  .overview-panels { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
   .profiles { display: none; }
   .banks-table-wrap { display: block; }
   .scan-cards { display: none; }

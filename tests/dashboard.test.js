@@ -243,6 +243,11 @@ async function main() {
     vHead.source === '/(.*)' && vMap['X-Frame-Options'] === 'DENY' &&
     vMap['Referrer-Policy'] === 'no-referrer' &&
     vMap['Permissions-Policy'] === 'camera=(), microphone=(), geolocation=()');
+  check('V66 render-gate fix: overview panels cannot blow out the page width (minmax(0,...) tracks, panels min-width 0, table wraps scroll internally)',
+    dashCss.indexOf('grid-template-columns: minmax(0, 1fr)') !== -1 &&
+    dashCss.indexOf('grid-template-columns: minmax(0, 7fr) minmax(0, 5fr)') !== -1 &&
+    dashCss.indexOf('.panel { min-width: 0; }') !== -1 &&
+    dashCss.indexOf('overflow-x: auto') !== -1);
   check('V66 seal mechanics remain pinned by the v63 checks above and the scan table keeps its eight columns (no invented writer column)',
     pageHtml.indexOf('<th scope="col">Device</th>') !== -1 && pageHtml.indexOf('Writer') === -1 &&
     typeof Core.sealCredentials === 'function' && Core.PBKDF2_ITERATIONS === 600000);
