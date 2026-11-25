@@ -176,6 +176,77 @@ async function main() {
   check('V64 buttons meet the 44px floor and keyboard focus is visible',
     dashCss.indexOf('min-height: 44px') !== -1 && dashCss.indexOf(':focus-visible') !== -1);
 
+
+  /* ---------- v66: House System v2 + adaptive shell ---------- */
+  check('V66 the desktop shell is a sidebar with brand, job-named destinations and a session block',
+    pageHtml.indexOf('id="sidebar"') !== -1 && pageHtml.indexOf('>Overview<') !== -1 &&
+    pageHtml.indexOf('>Palm Banks<') !== -1 && pageHtml.indexOf('>Scan Log<') !== -1 &&
+    pageHtml.indexOf('id="endpointChip"') !== -1 && pageHtml.indexOf('id="lockBtn"') !== -1);
+  check('V66 the sidebar has a collapse control and the collapse state is memory-only (no storage write for it)',
+    pageHtml.indexOf('id="sidebarCollapseBtn"') !== -1 && src.indexOf("classList.toggle('sidebar-collapsed')") !== -1 &&
+    src.indexOf("setItem('sidebar") === -1 && src.indexOf('setItem("sidebar') === -1);
+  check('V66 mobile gets a bottom nav with the three destinations and no sidebar dependency',
+    pageHtml.indexOf('class="bottom-nav"') !== -1 && pageHtml.indexOf('>Banks<') !== -1 &&
+    pageHtml.indexOf('>Scans<') !== -1 && dashCss.indexOf('.bottom-nav') !== -1);
+  check('V66 the existing scan search is promoted into the shell top bar with a last-updated line',
+    pageHtml.indexOf('class="shell-topbar"') !== -1 &&
+    pageHtml.slice(pageHtml.indexOf('class="shell-topbar"'), pageHtml.indexOf('id="errorBanner"')).indexOf('id="searchInput"') !== -1 &&
+    pageHtml.indexOf('id="lastUpdatedLine"') !== -1);
+  check('V66 Palm Banks is table-first on desktop: sortable columns, a toolbar search + status filter, and a detail drawer',
+    pageHtml.indexOf('id="banksTableBody"') !== -1 && pageHtml.indexOf('data-sort="biomId"') !== -1 &&
+    pageHtml.indexOf('data-sort="edccCount"') !== -1 && pageHtml.indexOf('data-sort="neuralCount"') !== -1 &&
+    pageHtml.indexOf('data-sort="status"') !== -1 && pageHtml.indexOf('id="profileSearchInput"') !== -1 &&
+    pageHtml.indexOf('id="profileStatusFilter"') !== -1 && pageHtml.indexOf('id="bankDrawer"') !== -1 &&
+    pageHtml.indexOf('id="bankDrawerBody"') !== -1);
+  const banksRows = Core.renderBanksRowsHtml(data.profiles);
+  check('V66 the banks table renders summary counts and status (incl. Removed) with no template data',
+    banksRows.indexOf('TSG-BIO-2841') !== -1 && banksRows.indexOf('>3</td>') !== -1 &&
+    banksRows.indexOf('Removed') !== -1 && banksRows.indexOf('data-biom-id="TSG-BIO-7777"') !== -1);
+  check('V66 the drawer detail is the same summary record the card renders (summary-only rule intact)',
+    Core.renderBankDetailHtml(data.profiles[0]) === Core.renderProfilesHtml([data.profiles[0]]) &&
+    Core.renderBankDetailHtml(data.profiles[0]).indexOf('Sealed (enc v1)') !== -1);
+  check('V66 bank sorting orders by the chosen summary column',
+    Core.sortProfiles(data.profiles, 'version', 1)[0].biomId === 'TSG-BIO-7777' &&
+    Core.sortProfiles(data.profiles, 'version', -1)[0].biomId === 'TSG-BIO-2841');
+  check('V66 Overview panels render from existing data only: recent scans capped at 8 and vault health summary',
+    Core.renderRecentScansRowsHtml(data.scans).indexOf('TSG-BIO-2841') !== -1 &&
+    Core.renderVaultHealthHtml(data.profiles).indexOf('Removed (tombstones)') !== -1 &&
+    Core.renderVaultHealthHtml(data.profiles).indexOf('sealed (enc v1)') !== -1 &&
+    pageHtml.indexOf('id="recentScansBody"') !== -1 && pageHtml.indexOf('id="vaultHealth"') !== -1 &&
+    pageHtml.indexOf('id="viewAllScansBtn"') !== -1);
+  check('V66 the mobile scan cards are day-grouped with the verdict chip first',
+    Core.renderScanCardsHtml(data.scans).indexOf('scan-day') !== -1 &&
+    Core.renderScanCardsHtml(data.scans).indexOf('badge badge-verified') !== -1 &&
+    pageHtml.indexOf('id="scansCards"') !== -1 && pageHtml.indexOf('id="filterToggleBtn"') !== -1);
+  check('V66 tokens have a SINGLE source (one :root block) and every figure style uses tabular numerals',
+    (dashCss.match(/:root\s*\{/g) || []).length === 1 &&
+    dashCss.indexOf('font-variant-numeric: tabular-nums') !== -1 &&
+    dashCss.indexOf('--primary:  #0b4ea2') !== -1 && dashCss.indexOf('--blue-950: #071c3f') !== -1 &&
+    dashCss.indexOf('--radius-sm: 12px') !== -1 && dashCss.indexOf('--radius-lg: 20px') !== -1 &&
+    dashCss.indexOf('--row-height: 44px') !== -1);
+  check('V66 skeletons exist in the new layouts (table-row skeletons desktop, card skeletons mobile)',
+    src.indexOf('skeltrow') !== -1 && dashCss.indexOf('.skeltrow') !== -1 &&
+    src.indexOf('skelcard') !== -1 && src.indexOf('skelstat') !== -1);
+  check('V66 the reduced-motion block covers the new drawer and sidebar transitions',
+    dashCss.indexOf('prefers-reduced-motion: reduce') !== -1 &&
+    dashCss.indexOf('.drawer') !== -1 && dashCss.indexOf('transition: transform var(--motion-page)') !== -1 &&
+    dashCss.indexOf('transition: width var(--motion-page)') !== -1);
+  check('V66 lock and setup use the split brand-panel layout and the setup fields are unchanged',
+    pageHtml.indexOf('class="auth-split"') !== -1 && pageHtml.indexOf('class="auth-brand"') !== -1 &&
+    pageHtml.indexOf('id="endpointInput"') !== -1 && pageHtml.indexOf('id="readKeyInput"') !== -1 &&
+    pageHtml.indexOf('id="passwordInput"') !== -1 && pageHtml.indexOf('id="passwordConfirmInput"') !== -1);
+  const vercel = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'vercel.json'), 'utf8'));
+  const vHead = (vercel.headers && vercel.headers[0]) || {};
+  const vMap = {};
+  (vHead.headers || []).forEach(function (h) { vMap[h.key] = h.value; });
+  check('V66 vercel.json adds the response headers Pages could never send, for all paths',
+    vHead.source === '/(.*)' && vMap['X-Frame-Options'] === 'DENY' &&
+    vMap['Referrer-Policy'] === 'no-referrer' &&
+    vMap['Permissions-Policy'] === 'camera=(), microphone=(), geolocation=()');
+  check('V66 seal mechanics remain pinned by the v63 checks above and the scan table keeps its eight columns (no invented writer column)',
+    pageHtml.indexOf('<th scope="col">Device</th>') !== -1 && pageHtml.indexOf('Writer') === -1 &&
+    typeof Core.sealCredentials === 'function' && Core.PBKDF2_ITERATIONS === 600000);
+
   console.log('\n' + (fail === 0 ? 'ALL DASHBOARD TESTS PASSED (' + pass + ')' : fail + ' FAILURES, ' + pass + ' passed'));
   process.exit(fail === 0 ? 0 : 1);
 }

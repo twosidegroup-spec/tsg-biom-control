@@ -231,6 +231,109 @@
     return opts.join('');
   }
 
+
+  /* ---------------- v66: banks table, drawer, overview panels ---------------- */
+
+  function profileCounts(p) {
+    return {
+      edcc: typeof p.edccCount === 'number' ? p.edccCount
+        : (Array.isArray(p.edccCodes) ? p.edccCodes.length : 0),
+      emb: typeof p.neuralCount === 'number' ? p.neuralCount
+        : (Array.isArray(p.neuralEmbeddings) ? p.neuralEmbeddings.length : 0)
+    };
+  }
+
+  function sortProfiles(profiles, key, dir) {
+    var d = dir === -1 ? -1 : 1;
+    return profiles.slice().sort(function (a, b) {
+      var av, bv;
+      if (key === 'edccCount') { av = profileCounts(a).edcc; bv = profileCounts(b).edcc; }
+      else if (key === 'neuralCount') { av = profileCounts(a).emb; bv = profileCounts(b).emb; }
+      else if (key === 'status') { av = a.deleted === true ? 1 : 0; bv = b.deleted === true ? 1 : 0; }
+      else if (key === 'version') { av = typeof a.version === 'number' ? a.version : -1; bv = typeof b.version === 'number' ? b.version : -1; }
+      else { av = String(a[key] || '').toLowerCase(); bv = String(b[key] || '').toLowerCase(); }
+      if (av < bv) return -1 * d;
+      if (av > bv) return 1 * d;
+      return 0;
+    });
+  }
+
+  function renderBanksRowsHtml(profiles) {
+    return profiles.map(function (p) {
+      var c = profileCounts(p);
+      var status = p.deleted === true
+        ? '<span class="badge badge-denied">Removed</span>'
+        : '<span class="badge badge-verified">Live</span>';
+      return '<tr data-biom-id="' + esc(p.biomId || '') + '">' +
+        '<td data-label="Biom ID">' + esc(p.biomId || '') + '</td>' +
+        '<td data-label="Name"><span class="profile-name">' + esc(p.deleted === true ? 'Removed' : (p.name || 'Unnamed profile')) + '</span></td>' +
+        '<td data-label="Hand">' + esc(handLabel(p.hand)) + '</td>' +
+        '<td data-label="EDCC templates" class="num">' + c.edcc + '</td>' +
+        '<td data-label="PalmNet templates" class="num">' + c.emb + '</td>' +
+        '<td data-label="Version" class="num">' + esc(typeof p.version === 'number' ? p.version : '—') + '</td>' +
+        '<td data-label="Status">' + status + '</td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  /* The drawer shows the full SUMMARY record for one bank — the
+     same fields the profile card renders. Summary data only. */
+  function renderBankDetailHtml(p) {
+    if (!p) return '';
+    return renderProfilesHtml([p]);
+  }
+
+  function renderRecentScansRowsHtml(scans) {
+    var latest = sortNewestFirst(scans).slice(0, 8);
+    return latest.map(function (s) {
+      var profileCell = '<span class="profile-name">' + esc(s.profileName || '—') + '</span>' +
+        (s.biomId ? '<span class="profile-id">' + esc(s.biomId) + '</span>' : '');
+      return '<tr>' +
+        '<td data-label="Time" class="time">' + esc(fmtDhaka(s.ts)) + '</td>' +
+        '<td data-label="Profile">' + profileCell + '</td>' +
+        '<td data-label="Result">' + resultBadgeHtml(s.result) + '</td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  function renderVaultHealthHtml(profiles) {
+    var removed = 0, sealed = 0, last = null;
+    profiles.forEach(function (p) {
+      if (p && p.deleted === true) removed++;
+      if (p && p.enc === 'v1') sealed++;
+      if (p && typeof p.updatedTs === 'number' && (last === null || p.updatedTs > last)) last = p.updatedTs;
+    });
+    return '<dl class="vault-list">' +
+      '<div><dt>Palm banks</dt><dd>' + profiles.length + '</dd></div>' +
+      '<div><dt>Removed (tombstones)</dt><dd>' + removed + '</dd></div>' +
+      '<div><dt>Encryption</dt><dd>' + sealed + ' of ' + profiles.length + ' sealed (enc v1)</dd></div>' +
+      '<div><dt>Sync status</dt><dd>' + (profiles.length ? 'Summaries synced from your API' : 'Nothing synced yet') + '</dd></div>' +
+      '<div><dt>Last bank update</dt><dd>' + esc(last === null ? '—' : fmtDhaka(last)) + '</dd></div>' +
+      '</dl>';
+  }
+
+  function renderScanCardsHtml(scans) {
+    var sorted = sortNewestFirst(scans);
+    var out = '', day = null;
+    sorted.forEach(function (s) {
+      var full = fmtDhaka(s.ts);
+      var d = full.indexOf(',') !== -1 ? full.slice(0, full.indexOf(',')) : full;
+      if (d !== day) { day = d; out += '<h3 class="scan-day">' + esc(d) + '</h3>'; }
+      out += '<article class="scan-card">' +
+        '<div>' + resultBadgeHtml(s.result) + '</div>' +
+        '<div class="scan-card-row"><span class="k">Profile</span><span><span class="profile-name">' + esc(s.profileName || '—') + '</span>' +
+        (s.biomId ? '<span class="profile-id">' + esc(s.biomId) + '</span>' : '') + '</span></div>' +
+        '<div class="scan-card-row"><span class="k">Kind</span><span>' + esc(kindLabel(s.kind)) + '</span></div>' +
+        '<div class="scan-card-row"><span class="k">Hand</span><span>' + esc(handLabel(s.hand)) + '</span></div>' +
+        '<div class="scan-card-row"><span class="k">EDCC</span><span class="num">' + esc(fmtScore(s.edccScore)) + '</span></div>' +
+        '<div class="scan-card-row"><span class="k">PalmNet</span><span class="num">' + esc(fmtScore(s.palmnetScore)) + '</span></div>' +
+        '<div class="scan-card-row"><span class="k">Time</span><span class="time">' + esc(full) + '</span></div>' +
+        '<div class="scan-card-row"><span class="k">Device</span><span>' + esc(s.deviceLabel || '—') + '</span></div>' +
+        '</article>';
+    });
+    return out;
+  }
+
   /* ---------------- API ---------------- */
 
   function apiError(status, message) {
@@ -356,6 +459,12 @@
     renderProfilesHtml: renderProfilesHtml,
     renderScansRowsHtml: renderScansRowsHtml,
     renderKindOptionsHtml: renderKindOptionsHtml,
+    sortProfiles: sortProfiles,
+    renderBanksRowsHtml: renderBanksRowsHtml,
+    renderBankDetailHtml: renderBankDetailHtml,
+    renderRecentScansRowsHtml: renderRecentScansRowsHtml,
+    renderVaultHealthHtml: renderVaultHealthHtml,
+    renderScanCardsHtml: renderScanCardsHtml,
     fetchJson: fetchJson,
     loadAll: loadAll
   };
@@ -368,7 +477,7 @@
   if (typeof document === 'undefined' || typeof window === 'undefined') return;
 
   var els = {};
-  var state = { scans: [], profiles: [], loading: false, timer: null };
+  var state = { scans: [], profiles: [], loading: false, timer: null, bankSort: { key: 'name', dir: 1 }, displayedProfiles: [] };
   /* v63: the unsealed credentials live ONLY in this variable —
      memory, never storage. Locked means null, and refresh()
      does nothing while locked, so no API call can happen
@@ -484,7 +593,6 @@
     var stats = Core.computeStats(state.scans, state.profiles);
     els.statsGrid.innerHTML = Core.renderStatsHtml(stats);
 
-    els.profilesGrid.innerHTML = Core.renderProfilesHtml(state.profiles);
     els.profilesEmpty.hidden = state.profiles.length !== 0;
 
     var currentKind = els.kindFilter.value;
@@ -499,7 +607,33 @@
       query: els.searchInput.value
     });
     els.scansBody.innerHTML = Core.renderScansRowsHtml(filtered);
+    if (els.scansCards) els.scansCards.innerHTML = Core.renderScanCardsHtml(filtered);
     els.scansEmpty.hidden = filtered.length !== 0;
+
+    /* v66: Overview panels + Palm Banks table/drawer data */
+    if (els.recentScansBody) {
+      els.recentScansBody.innerHTML = Core.renderRecentScansRowsHtml(state.scans);
+      els.recentScansEmpty.hidden = state.scans.length !== 0;
+    }
+    if (els.vaultHealth) els.vaultHealth.innerHTML = Core.renderVaultHealthHtml(state.profiles);
+    var pq = els.profileSearchInput ? els.profileSearchInput.value.trim().toLowerCase() : '';
+    var pstatus = els.profileStatusFilter ? els.profileStatusFilter.value : '';
+    var shownProfiles = state.profiles.filter(function (p) {
+      if (pstatus === 'live' && p.deleted === true) return false;
+      if (pstatus === 'removed' && p.deleted !== true) return false;
+      if (pq) {
+        var hay = (String(p.name || '') + ' ' + String(p.biomId || '')).toLowerCase();
+        if (hay.indexOf(pq) === -1) return false;
+      }
+      return true;
+    });
+    state.displayedProfiles = shownProfiles;
+    els.profilesGrid.innerHTML = Core.renderProfilesHtml(shownProfiles);
+    if (els.banksTableBody) {
+      els.banksTableBody.innerHTML = Core.renderBanksRowsHtml(
+        Core.sortProfiles(shownProfiles, state.bankSort.key, state.bankSort.dir));
+    }
+    if (els.banksEmpty) els.banksEmpty.hidden = !(state.profiles.length !== 0 && shownProfiles.length === 0);
     els.scanCountLine.textContent = state.scans.length === 0
       ? 'No scan records yet.'
       : 'Showing ' + filtered.length + ' of ' + state.scans.length + ' scan records, newest first.';
@@ -522,6 +656,10 @@
       els.statsGrid.innerHTML = '<div class="skelstat"><div class="skelbar w40"></div><div class="skelbar w65"></div></div>' +
         '<div class="skelstat"><div class="skelbar w40"></div><div class="skelbar w65"></div></div>' +
         '<div class="skelstat"><div class="skelbar w40"></div><div class="skelbar w65"></div></div>';
+      if (els.banksTableBody) els.banksTableBody.innerHTML = '<tr class="skeltrow"><td colspan="7"><div class="skelbar w65"></div></td></tr>' +
+        '<tr class="skeltrow"><td colspan="7"><div class="skelbar w40"></div></td></tr>';
+      if (els.recentScansBody) els.recentScansBody.innerHTML = '<tr class="skeltrow"><td colspan="3"><div class="skelbar w85"></div></td></tr>';
+      if (els.scansCards) els.scansCards.innerHTML = '<div class="skelcard"><div class="skelbar w65"></div><div class="skelbar w40"></div></div>';
       els.profilesGrid.innerHTML = '<div class="skelcard"><div class="skelbar w65"></div><div class="skelbar w40"></div><div class="skelbar w85"></div></div>' +
         '<div class="skelcard"><div class="skelbar w65"></div><div class="skelbar w40"></div><div class="skelbar w85"></div></div>';
     }
@@ -530,6 +668,7 @@
         state.scans = data.scans;
         state.profiles = data.profiles;
         els.statusBanner.hidden = true;
+        if (els.lastUpdatedLine) els.lastUpdatedLine.textContent = 'Last updated ' + Core.fmtDhaka(Date.now());
         renderAll();
       })
       .catch(function (err) {
@@ -537,6 +676,8 @@
         if (!state.scans.length && !state.profiles.length) {
           els.statsGrid.innerHTML = '';
           els.profilesGrid.innerHTML = '';
+          if (els.banksTableBody) els.banksTableBody.innerHTML = '';
+          if (els.recentScansBody) els.recentScansBody.innerHTML = '';
         }
         showError(err);
         if (err && err.status === 401) stopAutoRefresh();
@@ -586,8 +727,65 @@
      'errorBanner', 'errorText', 'reenterBtn',
      'statusBanner', 'statusText', 'statsGrid', 'profilesGrid', 'profilesEmpty',
      'kindFilter', 'resultFilter', 'searchInput', 'scanCountLine', 'scansBody',
-     'scansEmpty', 'refreshBtn', 'disconnectBtn', 'lockBtn', 'autoRefreshToggle'
+     'scansEmpty', 'refreshBtn', 'disconnectBtn', 'lockBtn', 'autoRefreshToggle',
+     'lastUpdatedLine', 'profileSearchInput', 'profileStatusFilter', 'banksTableBody', 'banksEmpty',
+     'recentScansBody', 'recentScansEmpty', 'vaultHealth', 'scansCards', 'bankDrawer', 'bankDrawerBody',
+     'bankDrawerCloseBtn', 'viewAllScansBtn', 'sidebarCollapseBtn', 'filterToggleBtn', 'scanFilterBar',
+     'overviewSection', 'banksSection', 'scansSection'
     ].forEach(function (id) { els[id] = $(id); });
+
+    /* v66 shell wiring: sidebar collapse (memory only), bank
+       sorting, the detail drawer, and the mobile filter sheet. */
+    if (els.sidebarCollapseBtn) {
+      els.sidebarCollapseBtn.addEventListener('click', function () {
+        document.body.classList.toggle('sidebar-collapsed');
+      });
+    }
+    if (els.viewAllScansBtn) {
+      els.viewAllScansBtn.addEventListener('click', function () {
+        if (els.scansSection) els.scansSection.scrollIntoView();
+      });
+    }
+    if (els.filterToggleBtn && els.scanFilterBar) {
+      els.filterToggleBtn.addEventListener('click', function () {
+        var collapsed = els.scanFilterBar.classList.toggle('filters-collapsed');
+        els.filterToggleBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      });
+    }
+    if (els.profileSearchInput) els.profileSearchInput.addEventListener('input', renderAll);
+    if (els.profileStatusFilter) els.profileStatusFilter.addEventListener('change', renderAll);
+    document.querySelectorAll('.sort-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var key = btn.getAttribute('data-sort');
+        if (state.bankSort.key === key) state.bankSort.dir = state.bankSort.dir * -1;
+        else state.bankSort = { key: key, dir: 1 };
+        renderAll();
+      });
+    });
+    function openBankDrawer(profile) {
+      if (!profile || !els.bankDrawer) return;
+      els.bankDrawerBody.innerHTML = Core.renderBankDetailHtml(profile);
+      els.bankDrawer.hidden = false;
+    }
+    if (els.bankDrawerCloseBtn) {
+      els.bankDrawerCloseBtn.addEventListener('click', function () { els.bankDrawer.hidden = true; });
+    }
+    if (els.banksTableBody) {
+      els.banksTableBody.addEventListener('click', function (ev) {
+        var row = ev.target.closest ? ev.target.closest('tr[data-biom-id]') : null;
+        if (!row) return;
+        var id = row.getAttribute('data-biom-id');
+        var match = null;
+        state.profiles.forEach(function (p) { if (String(p.biomId || '') === id) match = p; });
+        openBankDrawer(match);
+      });
+    }
+    els.profilesGrid.addEventListener('click', function (ev) {
+      var card = ev.target.closest ? ev.target.closest('.profile-card') : null;
+      if (!card) return;
+      var idx = Array.prototype.indexOf.call(els.profilesGrid.children, card);
+      if (idx >= 0 && state.displayedProfiles[idx]) openBankDrawer(state.displayedProfiles[idx]);
+    });
 
     els.setupForm.addEventListener('submit', function (ev) {
       ev.preventDefault();

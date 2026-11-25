@@ -19,33 +19,49 @@
 </head>
 <body>
 
-<header class="topbar">
-  <div class="topbar-inner">
+<div class="shell-layout">
+
+  <!-- ============ SIDEBAR (desktop) / TOP APP BAR (mobile) ============ -->
+  <aside class="sidebar" id="sidebar" aria-label="Dashboard">
     <div class="brand">
       <div class="brand-mark" aria-hidden="true">TSG</div>
       <div class="brand-text">
-        <h1>TSG Biom Control</h1>
-        <p>TwoSide Group &middot; Palm Biometric Console</p>
+        <p class="brand-name">TSG Biom Control</p>
+        <p class="brand-sub">TwoSide Group &middot; Palm Biometric Console</p>
       </div>
     </div>
-    <div class="topbar-actions" id="topbarActions" hidden>
-      <span class="endpoint-chip" id="endpointChip" title="Connected API endpoint"></span>
-      <label class="auto-toggle">
-        <input type="checkbox" id="autoRefreshToggle">
-        <span>Auto-refresh 30s</span>
-      </label>
-      <button type="button" class="btn btn-light" id="refreshBtn">Refresh</button>
-      <button type="button" class="btn btn-ghost" id="lockBtn">Lock</button>
-      <button type="button" class="btn btn-ghost" id="disconnectBtn">Disconnect</button>
+    <nav class="side-nav" aria-label="Sections">
+      <a class="side-nav-link" href="#overviewSection"><span>Overview</span></a>
+      <a class="side-nav-link" href="#banksSection"><span>Palm Banks</span></a>
+      <a class="side-nav-link" href="#scansSection"><span>Scan Log</span></a>
+    </nav>
+    <div class="session-block">
+      <div class="topbar-actions" id="topbarActions" hidden>
+        <span class="endpoint-chip" id="endpointChip" title="Connected API endpoint"></span>
+        <label class="auto-toggle">
+          <input type="checkbox" id="autoRefreshToggle">
+          <span>Auto-refresh 30s</span>
+        </label>
+        <button type="button" class="btn btn-light" id="refreshBtn">Refresh</button>
+        <button type="button" class="btn btn-ghost" id="lockBtn">Lock</button>
+        <button type="button" class="btn btn-ghost" id="disconnectBtn">Disconnect</button>
+      </div>
+      <button type="button" class="btn btn-ghost sidebar-collapse" id="sidebarCollapseBtn" aria-label="Collapse sidebar">Collapse</button>
     </div>
-  </div>
-</header>
+  </aside>
 
-<main class="wrap">
+  <div class="shell-content">
+  <main class="wrap">
 
   <!-- ============ LOCK (v63: password-only) ============ -->
   <section id="lockView" class="setup-wrap" hidden>
-    <div class="card setup-card">
+    <div class="auth-split">
+      <div class="auth-brand" aria-hidden="true">
+        <div class="brand-mark">TSG</div>
+        <p class="auth-brand-name">TSG Biom Control</p>
+        <p class="auth-brand-sub">TwoSide Group &middot; Palm Biometric Console</p>
+      </div>
+      <div class="card setup-card">
       <h2>Locked</h2>
       <p class="muted">
         This dashboard is locked. Enter your dashboard password to unlock it —
@@ -63,12 +79,19 @@
         The read key on this browser is stored sealed — encrypted under your password —
         never in plain text. <button type="button" class="linklike" id="lockResetBtn">Forget the sealed key on this browser</button>
       </p>
+      </div>
     </div>
   </section>
 
   <!-- ============ SETUP ============ -->
   <section id="setupView" class="setup-wrap" hidden>
-    <div class="card setup-card">
+    <div class="auth-split">
+      <div class="auth-brand" aria-hidden="true">
+        <div class="brand-mark">TSG</div>
+        <p class="auth-brand-name">TSG Biom Control</p>
+        <p class="auth-brand-sub">TwoSide Group &middot; Palm Biometric Console</p>
+      </div>
+      <div class="card setup-card">
       <h2 id="setupHeading">Connect to your TSG Biom API</h2>
       <p class="muted" id="setupIntroFresh">
         This dashboard reads the scan records and palm banks your phone syncs to your own
@@ -109,11 +132,22 @@
         In this build the dashboard connects only to the TSG Biom API — the endpoint above is
         fixed for this build.
       </p>
+      </div>
     </div>
   </section>
 
   <!-- ============ MAIN ============ -->
   <section id="mainView" hidden>
+
+    <!-- Shell top bar: the existing scan search, promoted into the shell -->
+    <div class="shell-topbar">
+      <label class="field field-inline field-grow shell-search">
+        <span>Search scans</span>
+        <input type="search" id="searchInput" placeholder="Search name or Biom ID&hellip;" spellcheck="false">
+      </label>
+      <p class="last-updated num" id="lastUpdatedLine" aria-live="off"></p>
+      <button type="button" class="btn btn-light filter-toggle" id="filterToggleBtn" aria-expanded="false">Filters</button>
+    </div>
 
     <div class="banner banner-error" id="errorBanner" role="alert" hidden>
       <p id="errorText"></p>
@@ -125,23 +159,79 @@
     </div>
 
     <!-- Overview -->
-    <section aria-labelledby="overviewHeading">
+    <section aria-labelledby="overviewHeading" id="overviewSection">
       <h2 class="section-title" id="overviewHeading">Overview</h2>
       <div class="stats" id="statsGrid"></div>
+      <div class="overview-panels">
+        <div class="card panel recent-panel">
+          <div class="panel-head">
+            <h3>Recent scans</h3>
+            <button type="button" class="linklike" id="viewAllScansBtn">View all</button>
+          </div>
+          <div class="table-wrap table-wrap-plain">
+            <table class="scans-table mini-table">
+              <thead>
+                <tr>
+                  <th scope="col">Time (Dhaka)</th>
+                  <th scope="col">Profile</th>
+                  <th scope="col">Result</th>
+                </tr>
+              </thead>
+              <tbody id="recentScansBody"></tbody>
+            </table>
+          </div>
+          <p class="empty-note" id="recentScansEmpty" hidden>No scan records yet. Records appear here after the phone syncs.</p>
+        </div>
+        <div class="card panel vault-panel">
+          <div class="panel-head"><h3>Vault health</h3></div>
+          <div id="vaultHealth"></div>
+        </div>
+      </div>
     </section>
 
-    <!-- Profiles -->
-    <section aria-labelledby="profilesHeading">
-      <h2 class="section-title" id="profilesHeading">Enrolled palms</h2>
+    <!-- Palm Banks -->
+    <section aria-labelledby="profilesHeading" id="banksSection">
+      <h2 class="section-title" id="profilesHeading">Palm Banks</h2>
+      <div class="filter-bar banks-toolbar">
+        <label class="field field-inline field-grow">
+          <span>Search palm banks</span>
+          <input type="search" id="profileSearchInput" placeholder="Search name or Biom ID&hellip;" spellcheck="false">
+        </label>
+        <label class="field field-inline">
+          <span>Status</span>
+          <select id="profileStatusFilter">
+            <option value="">All statuses</option>
+            <option value="live">Live</option>
+            <option value="removed">Removed</option>
+          </select>
+        </label>
+      </div>
+      <div class="table-wrap banks-table-wrap">
+        <table class="scans-table banks-table">
+          <thead>
+            <tr>
+              <th scope="col"><button type="button" class="sort-btn" data-sort="biomId">Biom ID</button></th>
+              <th scope="col"><button type="button" class="sort-btn" data-sort="name">Name</button></th>
+              <th scope="col"><button type="button" class="sort-btn" data-sort="hand">Hand</button></th>
+              <th scope="col"><button type="button" class="sort-btn" data-sort="edccCount">EDCC templates</button></th>
+              <th scope="col"><button type="button" class="sort-btn" data-sort="neuralCount">PalmNet templates</button></th>
+              <th scope="col"><button type="button" class="sort-btn" data-sort="version">Version</button></th>
+              <th scope="col"><button type="button" class="sort-btn" data-sort="status">Status</button></th>
+            </tr>
+          </thead>
+          <tbody id="banksTableBody"></tbody>
+        </table>
+      </div>
       <div class="profiles" id="profilesGrid"></div>
       <p class="empty-note" id="profilesEmpty" hidden>No palm profiles have synced yet. Profiles appear here after a device enrols a palm and syncs its bank.</p>
+      <p class="empty-note" id="banksEmpty" hidden>No palm banks match the current search or status filter.</p>
     </section>
 
-    <!-- Scans -->
-    <section aria-labelledby="scansHeading">
-      <h2 class="section-title" id="scansHeading">Scan records</h2>
+    <!-- Scan Log -->
+    <section aria-labelledby="scansHeading" id="scansSection">
+      <h2 class="section-title" id="scansHeading">Scan Log</h2>
 
-      <div class="filter-bar">
+      <div class="filter-bar filters-collapsed" id="scanFilterBar">
         <label class="field field-inline">
           <span>Kind</span>
           <select id="kindFilter"></select>
@@ -155,15 +245,11 @@
             <option value="other">Other</option>
           </select>
         </label>
-        <label class="field field-inline field-grow">
-          <span>Search name or Biom ID</span>
-          <input type="search" id="searchInput" placeholder="Search&hellip;" spellcheck="false">
-        </label>
       </div>
 
       <p class="count-line" id="scanCountLine" aria-live="polite"></p>
 
-      <div class="table-wrap">
+      <div class="table-wrap scans-table-wrap">
         <table class="scans-table">
           <thead>
             <tr>
@@ -180,6 +266,7 @@
           <tbody id="scansBody"></tbody>
         </table>
       </div>
+      <div class="scan-cards" id="scansCards"></div>
       <p class="empty-note" id="scansEmpty" hidden>No scan records match. Records appear here after the phone syncs.</p>
     </section>
 
@@ -189,7 +276,25 @@
     <p>TSG Biom Control &middot; Data comes only from your own TSG Biom API. Matching always happens on the device; this page only displays synced records.</p>
   </footer>
 
-</main>
+  </main>
+  </div>
+</div>
+
+<!-- ============ BANK DETAIL DRAWER (desktop) / FULL-SCREEN DETAIL (mobile) ============ -->
+<aside class="drawer" id="bankDrawer" hidden aria-label="Palm bank detail">
+  <div class="drawer-head">
+    <h2>Palm bank detail</h2>
+    <button type="button" class="btn btn-light" id="bankDrawerCloseBtn">Close</button>
+  </div>
+  <div class="drawer-body" id="bankDrawerBody"></div>
+</aside>
+
+<!-- ============ BOTTOM NAV (mobile) ============ -->
+<nav class="bottom-nav" aria-label="Sections">
+  <a class="bottom-nav-link" href="#overviewSection">Overview</a>
+  <a class="bottom-nav-link" href="#banksSection">Banks</a>
+  <a class="bottom-nav-link" href="#scansSection">Scans</a>
+</nav>
 
 <script src="app.js"></script>
 </body>
