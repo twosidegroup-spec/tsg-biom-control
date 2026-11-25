@@ -243,6 +243,8 @@ async function main() {
     vHead.source === '/(.*)' && vMap['X-Frame-Options'] === 'DENY' &&
     vMap['Referrer-Policy'] === 'no-referrer' &&
     vMap['Permissions-Policy'] === 'camera=(), microphone=(), geolocation=()');
+  check('V66 render-gate fix: the hidden attribute always wins over view layout display values ([hidden] guard present)',
+    dashCss.indexOf('[hidden] { display: none !important; }') !== -1);
   check('V66 render-gate fix: overview panels cannot blow out the page width (minmax(0,...) tracks, panels min-width 0, table wraps scroll internally)',
     dashCss.indexOf('grid-template-columns: minmax(0, 1fr)') !== -1 &&
     dashCss.indexOf('grid-template-columns: minmax(0, 7fr) minmax(0, 5fr)') !== -1 &&

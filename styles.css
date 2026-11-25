@@ -57,6 +57,12 @@
 
 * { box-sizing: border-box; }
 
+/* The hidden attribute always wins: view sections carry layout
+   display values (flex/block) of their own, and without this guard
+   a "hidden" lock/setup view keeps rendering above the main view
+   (render-gate find, v66). */
+[hidden] { display: none !important; }
+
 html { -webkit-text-size-adjust: 100%; }
 
 body {
