@@ -68,6 +68,30 @@ chooses. From then on, every visit asks only for the password.
 
 Anyone who opens the page without the password sees only the lock screen.
 
+## Security posture and the GitHub Pages limits (v64)
+
+- **Content Security Policy.** The dashboard ships a strict CSP
+  in a `<meta>` tag: `default-src 'none'`, scripts from `'self'`
+  only, and `connect-src` pinned to the one TSG Biom API this
+  build talks to. It also sends `referrer: no-referrer` by meta.
+- **What meta cannot do — stated plainly.** GitHub Pages cannot
+  send custom response headers, so: `frame-ancestors` (clickjacking
+  framing protection) and CSP reporting cannot be expressed in a
+  meta tag and are **absent** on this host; HSTS and
+  Permissions-Policy cannot be set by meta at all. The residual
+  framing exposure is a read-only owner console behind a
+  password-sealed key; it closes the day the dashboard moves to
+  a host that can send headers. The API itself sends the full
+  header set from code (see the API README).
+- **Escaping.** Every API-supplied field is rendered through the
+  dashboard's `esc()` — proven by a hostile-fixture test: a
+  profile name or scan field containing markup renders as text,
+  never as markup.
+- **Password floor.** Setup and migration refuse dashboard
+  passwords under 8 characters (the password is the only thing
+  protecting the sealed read key). Unlock is never length-checked:
+  an existing seal always opens with the password it was made with.
+
 ## Going live (GitHub Pages)
 
 The dashboard is designed to sit on the same GitHub Pages origin as the BIOM app

@@ -3,6 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- v64 (Phase A Step 5.1, Seat 2): Content Security Policy. GitHub
+     Pages cannot send response headers, so the policy rides in this
+     meta tag; frame-ancestors and reporting cannot be expressed here
+     and HSTS / Permissions-Policy cannot be set by meta at all — the
+     README's security-posture table states those limits plainly.
+     script-src is 'self' only (no inline script exists in this
+     dashboard), connect-src is pinned to the one API this build
+     talks to. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; script-src-attr 'none'; connect-src https://tsg-biom-api.vercel.app; style-src 'self'; img-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; worker-src 'none'; media-src 'none'; frame-src 'none'; manifest-src 'none'">
+<meta name="referrer" content="no-referrer">
 <title>TSG Biom Control — TwoSide Group</title>
 <meta name="description" content="Control dashboard for the TSG BIOM palm biometric system. Shows the scan records and palm banks your devices sync to your own TSG Biom API.">
 <link rel="stylesheet" href="styles.css">
@@ -96,6 +106,8 @@
         The endpoint and key are stored only in this browser, sealed — encrypted under your
         dashboard password (AES-GCM, PBKDF2) — never in plain text, and sent only to your API.
         Disconnect clears them. Palm template contents are never displayed here.
+        In this build the dashboard connects only to the TSG Biom API — the endpoint above is
+        fixed for this build.
       </p>
     </div>
   </section>
@@ -149,7 +161,7 @@
         </label>
       </div>
 
-      <p class="count-line" id="scanCountLine"></p>
+      <p class="count-line" id="scanCountLine" aria-live="polite"></p>
 
       <div class="table-wrap">
         <table class="scans-table">

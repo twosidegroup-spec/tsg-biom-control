@@ -513,6 +513,18 @@
     els.errorBanner.hidden = true;
     els.statusBanner.hidden = false;
     els.statusText.textContent = 'Loading records…';
+    /* v64 (Seat 1 L-1 / Seat 3 R-UX7): on a cold load (nothing
+       rendered yet) the grids hold skeleton blocks while the fetch
+       runs — never an empty frame and never the "no profiles" note
+       mid-flight. renderAll replaces them wholesale on success; on
+       failure they are cleared so the error banner stands alone. */
+    if (!state.scans.length && !state.profiles.length) {
+      els.statsGrid.innerHTML = '<div class="skelstat"><div class="skelbar w40"></div><div class="skelbar w65"></div></div>' +
+        '<div class="skelstat"><div class="skelbar w40"></div><div class="skelbar w65"></div></div>' +
+        '<div class="skelstat"><div class="skelbar w40"></div><div class="skelbar w65"></div></div>';
+      els.profilesGrid.innerHTML = '<div class="skelcard"><div class="skelbar w65"></div><div class="skelbar w40"></div><div class="skelbar w85"></div></div>' +
+        '<div class="skelcard"><div class="skelbar w65"></div><div class="skelbar w40"></div><div class="skelbar w85"></div></div>';
+    }
     return Core.loadAll(creds.endpoint, creds.readKey)
       .then(function (data) {
         state.scans = data.scans;
@@ -521,6 +533,11 @@
         renderAll();
       })
       .catch(function (err) {
+        /* v64: a failed cold load leaves no skeleton behind. */
+        if (!state.scans.length && !state.profiles.length) {
+          els.statsGrid.innerHTML = '';
+          els.profilesGrid.innerHTML = '';
+        }
         showError(err);
         if (err && err.status === 401) stopAutoRefresh();
       })
@@ -578,6 +595,16 @@
       var confirm = els.passwordConfirmInput.value;
       if (!password) {
         els.setupError.textContent = 'Set the dashboard password — it seals the read key on this browser.';
+        els.setupError.hidden = false;
+        return;
+      }
+      /* v64 (Seat 2 M-6): a minimum length at SETUP and MIGRATION
+         only — the seal previously accepted any non-empty string,
+         including a one-character password over the read key. The
+         unlock path is deliberately NOT length-checked: an existing
+         seal must always open with the password it was made with. */
+      if (password.length < 8) {
+        els.setupError.textContent = 'Use at least 8 characters for the dashboard password — it is the only thing protecting the sealed read key on this browser.';
         els.setupError.hidden = false;
         return;
       }

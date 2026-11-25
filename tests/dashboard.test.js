@@ -125,6 +125,57 @@ async function main() {
     src.indexOf('password ===') === -1 && src.indexOf('value === \'') === -1 &&
     src.indexOf('Core.unsealCredentials(') !== -1);
 
+  /* ---------- v64: CSP, escaping proof, password floor, polish --- */
+  const cspMatch = pageHtml.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/);
+  check('V64 the dashboard ships a Content-Security-Policy meta (Pages cannot send headers — the README states the limits)',
+    !!cspMatch && cspMatch[1].indexOf("default-src 'none'") === 0);
+  check('V64 the policy allows scripts from self only — no unsafe-inline, no CDN',
+    !!cspMatch && cspMatch[1].indexOf("script-src 'self'") !== -1 &&
+    cspMatch[1].indexOf('unsafe-inline') === -1 && cspMatch[1].indexOf('http') === cspMatch[1].indexOf('https://tsg-biom-api.vercel.app'));
+  check('V64 connect-src is pinned to the one TSG Biom API this build talks to',
+    !!cspMatch && cspMatch[1].indexOf('connect-src https://tsg-biom-api.vercel.app') !== -1);
+  check('V64 the page sends no referrer', pageHtml.indexOf('<meta name="referrer" content="no-referrer">') !== -1);
+
+  /* The hostile-fixture proof (Seat 2 re-verification, executable):
+     a profile name and scan fields carrying markup must render as
+     TEXT through the shipped Core renderers — the escaped entity
+     present, the raw tag absent. */
+  const hostile = [{
+    biomId: 'TSG-BIO-6666', name: '<script>alert(1)</script>', hand: 'left', neuralModel: 'palmnet-r3-ep12',
+    edccCount: 1, neuralCount: 1, enc: 'v1', version: 1, deleted: false, deletedTs: null,
+    updatedTs: 1764000000000, ownerDeviceId: 'dev-<img src=x onerror=alert(2)>'
+  }];
+  const hostileHtml = Core.renderProfilesHtml(hostile);
+  check('V64 ESCAPING a hostile profile name renders as text, never markup',
+    hostileHtml.indexOf('&lt;script&gt;alert(1)&lt;/script&gt;') !== -1 &&
+    hostileHtml.indexOf('<script>alert(1)</script>') === -1 &&
+    hostileHtml.indexOf('<img src=x') === -1);
+  const hostileScans = [{
+    id: 'sx', ts: 1764000000000, deviceLabel: '<b>Rig</b>', kind: 'verify',
+    profileName: '"><svg onload=alert(3)>', biomId: 'TSG-BIO-6666', hand: 'left',
+    edccScore: 0.5, palmnetScore: 0.9, result: 'Verified'
+  }];
+  const hostileRows = Core.renderScansRowsHtml(hostileScans);
+  check('V64 ESCAPING hostile scan fields render as text, never markup',
+    hostileRows.indexOf('<svg onload') === -1 && hostileRows.indexOf('<b>Rig</b>') === -1 &&
+    hostileRows.indexOf('&lt;b&gt;Rig&lt;/b&gt;') !== -1 && hostileRows.indexOf('&lt;svg') !== -1);
+
+  check('V64 the setup/migration password floor is 8 characters, with the honest reason in the copy',
+    src.indexOf('password.length < 8') !== -1 &&
+    src.indexOf('at least 8 characters for the dashboard password') !== -1);
+  const lockSubmit = src.slice(src.indexOf("els.lockForm.addEventListener('submit'"));
+  check('V64 the UNLOCK path carries NO length check (an existing seal always opens with its own password)',
+    lockSubmit.indexOf('password.length') === -1 && lockSubmit.indexOf('unsealCredentials') !== -1);
+
+  const dashCss = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
+  check('V64 the topbar is the solid house colour (no gradient) and linklike names a defined token',
+    dashCss.indexOf('linear-gradient') === -1 && dashCss.indexOf('color:var(--blue-600)') !== -1);
+  check('V64 cold-load skeletons exist in wiring + CSS, and the count line is a polite live region',
+    src.indexOf('skelstat') !== -1 && src.indexOf('skelcard') !== -1 &&
+    dashCss.indexOf('.skelbar') !== -1 && pageHtml.indexOf('id="scanCountLine" aria-live="polite"') !== -1);
+  check('V64 buttons meet the 44px floor and keyboard focus is visible',
+    dashCss.indexOf('min-height: 44px') !== -1 && dashCss.indexOf(':focus-visible') !== -1);
+
   console.log('\n' + (fail === 0 ? 'ALL DASHBOARD TESTS PASSED (' + pass + ')' : fail + ' FAILURES, ' + pass + ' passed'));
   process.exit(fail === 0 ? 0 : 1);
 }
