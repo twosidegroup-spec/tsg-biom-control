@@ -1,0 +1,54 @@
+TSG BIOM — PROPRIETARY LICENCE
+
+Copyright (c) 2026 TwoSide Group (TSG). All rights reserved.
+
+1. OWNERSHIP. This software — including its source code, design,
+   documentation, and the PalmNet model weights and TSGP model
+   container shipped with it — is the exclusive property of
+   TwoSide Group. The PalmNet weights are a named covered asset
+   of this licence: they were trained by TwoSide Group and may
+   not be extracted, copied, retrained from, or redistributed
+   separately from this software.
+
+2. NO GRANT. No licence, right, or permission of any kind is
+   granted to any person to use, copy, modify, distribute,
+   sublicense, or create derivative works from this software,
+   except the limited right of the owner to operate it for the
+   business of TwoSide Group and the rights expressly recorded
+   in THIRD-PARTY-STATUS.md for the components named there.
+
+3. EDCC CARVE-OUT. The palmprint coding component identified in
+   THIRD-PARTY-STATUS.md as a port of the EDCC reference
+   implementation (MIT licence) is NOT claimed as exclusive
+   TwoSide Group property; it remains under its original licence,
+   whose notice is preserved in that record. TwoSide Group's
+   modifications to it are TwoSide Group property.
+
+4. THIRD PARTIES. Any third-party component that remains in a
+   shipped build is listed in THIRD-PARTY-STATUS.md with its
+   licence. No unlisted third-party code is licensed for use in
+   this project.
+
+5. STORED DATA. Biometric templates and records processed by
+   this software are the data of TwoSide Group and its enrolled
+   users. This licence grants no right over that data to any
+   person, including any hosting, platform, or service provider
+   used to run the software; providers hold it as custodians
+   only, and it is exportable and removable at the owner's sole
+   direction.
+
+6. NAMES. "TSG Biom", "BIOM", "regBIOM", "takeBIOM", "PalmNet"
+   (as the name of TwoSide Group's palmprint model), the Biom ID
+   format, and the application identifiers are reserved to
+   TwoSide Group.
+
+7. CONTRIBUTIONS. Any contribution made to this project by any
+   person is assigned to TwoSide Group on submission, unless a
+   separate written agreement states otherwise.
+
+8. NO WARRANTY. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT
+   WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT
+   LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+   PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+   TWOSIDE GROUP BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY ARISING FROM THE USE OF THE SOFTWARE.

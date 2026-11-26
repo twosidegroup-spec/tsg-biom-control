@@ -102,7 +102,7 @@ async function main() {
 
   /* ---------- v63: the lock gate in the shipped wiring ---------- */
   const pageHtml = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
-  const lockSlice = pageHtml.slice(pageHtml.indexOf('id="lockView"'), pageHtml.indexOf('id="setupView"'));
+  const lockSlice = pageHtml.slice(pageHtml.indexOf('id="lockView"'), pageHtml.indexOf('id="firstRunView"'));
   check('LOCK the lock screen asks ONLY for the password (no read-key or endpoint field)',
     lockSlice.indexOf('id="lockPasswordInput"') !== -1 && lockSlice.indexOf('type="password"') !== -1 &&
     lockSlice.indexOf('readKeyInput') === -1 && lockSlice.indexOf('endpointInput') === -1);
@@ -301,6 +301,129 @@ async function main() {
   const dashAppSrc = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
   check('V74 the drawer wiring passes the loaded scans into the person detail',
     dashAppSrc.indexOf('Core.renderBankDetailHtml(profile, state.scans)') !== -1);
+
+  /* ---- v78: Settings-page connection, first-run front door ---- */
+  check('V78 the front door with no seal is a quiet notice — the first-run view holds NO form fields at all',
+    pageHtml.indexOf('id="firstRunView"') !== -1 &&
+    pageHtml.slice(pageHtml.indexOf('id="firstRunView"'), pageHtml.indexOf('id="settingsView"')).indexOf('<input') === -1 &&
+    pageHtml.slice(pageHtml.indexOf('id="firstRunView"'), pageHtml.indexOf('id="settingsView"')).indexOf('id="firstRunSettingsBtn"') !== -1);
+  check('V78 the connection form lives INSIDE the Settings view (endpoint, read key, admin key, password)',
+    pageHtml.indexOf('id="settingsView"') !== -1 &&
+    pageHtml.indexOf('id="setupForm"') > pageHtml.indexOf('id="settingsView"') &&
+    pageHtml.indexOf('id="adminKeyInput"') > pageHtml.indexOf('id="settingsView"') &&
+    pageHtml.indexOf('id="adminActivityCard"') > pageHtml.indexOf('id="settingsView"'));
+  check('V78 Settings is reachable from the sidebar and the mobile bottom nav',
+    pageHtml.indexOf('id="settingsNavLink"') !== -1 && pageHtml.indexOf('id="bottomSettingsLink"') !== -1 &&
+    pageHtml.indexOf('id="settingsBackBtn"') !== -1);
+  check('V78 entry rule: sealed -> lock; legacy -> first-run migrate notice; new -> first-run notice (setup never fronts)',
+    dashAppSrc.indexOf("showFirstRun('migrate')") !== -1 && dashAppSrc.indexOf("showFirstRun('fresh')") !== -1 &&
+    dashAppSrc.indexOf('showSetup(') === -1 && dashAppSrc.indexOf('id="setupView"') === -1 &&
+    pageHtml.indexOf('id="setupView"') === -1);
+  const sealedAdmin = await Core.sealCredentials(TEST_PASSWORD, { endpoint: 'https://api.test', readKey: 'rk-1', adminKey: 'ak-1' });
+  const openedAdmin = await Core.unsealCredentials(TEST_PASSWORD, sealedAdmin);
+  check('V78 the admin key rides the SAME seal as the read key and round-trips under the password',
+    openedAdmin.adminKey === 'ak-1' && openedAdmin.readKey === 'rk-1' &&
+    JSON.stringify(sealedAdmin).indexOf('ak-1') === -1);
+  check('V78 a pre-v78 seal (no adminKey in the payload) opens with an empty admin key',
+    dashAppSrc.indexOf("adminKey: obj.adminKey || ''") !== -1);
+
+  /* ---- v78: person control view (network, palm code, wallet) ---- */
+  const FP = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2';
+  const FULL = [{
+    biomId: 'TSG-BIO-2841', name: 'Sajid', phone: '01933038706', hand: 'left', neuralModel: 'palmnet-r3-ep12',
+    edccCount: 3, neuralCount: 3, enc: 'v1', version: 5, deleted: false, deletedTs: null,
+    createdTs: 1763900000000, updatedTs: 1764200000000, ownerDeviceId: 'dev-abc123',
+    blocked: false, blockedTs: null, blockedReason: null,
+    regIp: '203.0.113.7', regGeoCountry: 'BD', regGeoCity: 'Dhaka',
+    lastIp: '198.51.100.9', lastGeoCountry: 'BD', lastGeoCity: 'Chattogram',
+    bankFingerprint: FP, edccBytes: 2560, neuralDims: 512,
+    wallet: { balance: 1500, statement: [
+      { ref: 'w1', ts: 1764000000000, kind: 'add', amount: 2000, balanceAfter: 2000, accountType: 'bkash', accountLabel: 'bKash ••8575' },
+      { ref: 'w2', ts: 1764100000000, kind: 'send', amount: 500, balanceAfter: 1500, counterpartyId: 'TSG-BIO-5555', counterpartyName: 'Rahim Uddin' },
+      { ref: 'w3', ts: 1764150000000, kind: 'receive', amount: 250, balanceAfter: 1750, counterpartyId: 'TSG-BIO-5555', counterpartyName: 'Rahim Uddin' },
+      { ref: 'w4', ts: 1764180000000, kind: 'send', amount: 250, balanceAfter: 1500, counterpartyId: 'TSG-BIO-5555', counterpartyName: 'Rahim Uddin' }
+    ] },
+    pays: [ { id: 'BIOM-PAY-1', ts: 1764190000000, amount: 300, store: 'Test Store', provider: 'bkash', status: 'Completed' } ]
+  }];
+  const NET_SCANS = [
+    { id: 'n1', ts: 1764300000000, deviceLabel: 'Rig', kind: 'verify', profileName: 'Sajid', biomId: 'TSG-BIO-2841', hand: 'left', edccScore: 0.5, palmnetScore: 0.9, result: 'Verified', ip: '192.0.2.44', geoCountry: 'BD', geoCity: 'Khulna' }
+  ];
+  const control = Core.renderPersonControlHtml(FULL[0], NET_SCANS);
+  check('V78 the person view shows registration IP + location from the server stamps',
+    control.indexOf('Registered from') !== -1 && control.indexOf('203.0.113.7') !== -1 && control.indexOf('Dhaka, BD') !== -1);
+  check('V78 the latest sighting is the NEWER scan stamp, not the older profile stamp',
+    control.indexOf('Latest seen') !== -1 && control.indexOf('192.0.2.44') !== -1 && control.indexOf('Khulna, BD') !== -1);
+  check('V78 the palm renders as CODE: envelope, template counts/sizes and the SHA-256 fingerprint — never an image',
+    control.indexOf('Palm — encrypted code') !== -1 && control.indexOf('enc.v1 (sealed)') !== -1 &&
+    control.indexOf(FP) !== -1 && control.indexOf('2560 bytes') !== -1 && control.indexOf('512 dimensions') !== -1 &&
+    control.indexOf('<img') === -1 && control.indexOf('no palm image exists') !== -1);
+  const totals = Core.walletTotals(FULL[0]);
+  check('V78 wallet totals derive exactly like the app statement (added/sent/received/paid + balance)',
+    totals.balance === 1500 && totals.added === 2000 && totals.sent === 750 && totals.received === 250 && totals.paid === 300,
+    JSON.stringify(totals));
+  check('V78 the ledger lists every entry kind with its counterparty / merchant detail',
+    control.indexOf('BDT 1,500') !== -1 && control.indexOf('Add money') !== -1 && control.indexOf('bKash ••8575') !== -1 &&
+    control.indexOf('Send money → Rahim Uddin (TSG-BIO-5555)') !== -1 && control.indexOf('Received ← Rahim Uddin') !== -1 &&
+    control.indexOf('Biom Pay · Test Store · bkash') !== -1 && control.indexOf('Total paid (Biom Pay)') !== -1);
+  const legacyControl = Core.renderPersonControlHtml(SUMMARY[0], SCANS);
+  check('V78 a pre-v78 summary degrades honestly (capture/fingerprint/wallet notes, no invented values)',
+    legacyControl.indexOf('Not captured') !== -1 && legacyControl.indexOf('fingerprint appears here once the API runs the v78 build') !== -1 &&
+    legacyControl.indexOf('Wallet records appear here') !== -1 && legacyControl.indexOf('BDT') === -1);
+  check('V78 a tombstone renders no control sections at all',
+    Core.renderPersonControlHtml(SUMMARY[1], SCANS) === '');
+  const hostileControl = Core.renderPersonControlHtml({ biomId: 'X', name: 'n', deleted: false, wallet: { balance: 5, statement: [{ ref: 'h', ts: 1, kind: 'send', amount: 5, balanceAfter: 0, counterpartyId: 'Y', counterpartyName: '<script>alert(9)</script>' }] } }, []);
+  check('V78 ESCAPING a hostile counterparty name in the ledger renders as text',
+    hostileControl.indexOf('<script>alert(9)</script>') === -1 && hostileControl.indexOf('&lt;script&gt;') !== -1);
+
+  /* ---- v78: block flow states + admin API ---- */
+  const noKeyHtml = Core.renderBlockActionHtml(FULL[0], { adminKeyPresent: false });
+  check('V78 BLOCK with no admin key sealed, the control explains and routes to Settings',
+    noKeyHtml.indexOf('not set up on this browser') !== -1 && noKeyHtml.indexOf('data-action="open-settings"') !== -1 &&
+    noKeyHtml.indexOf('data-action="block-arm"') === -1);
+  const armHtml = Core.renderBlockActionHtml(FULL[0], { adminKeyPresent: true });
+  check('V78 BLOCK an unblocked person gets the block action with the enforcement copy',
+    armHtml.indexOf('data-action="block-arm"') !== -1 && armHtml.indexOf('revokes the person') !== -1 &&
+    armHtml.indexOf('This account has been blocked') !== -1);
+  const armedHtml = Core.renderBlockActionHtml(FULL[0], { adminKeyPresent: true, armed: true });
+  check('V78 BLOCK the armed state asks for an optional reason and a confirm tap (two-tap rule)',
+    armedHtml.indexOf('block-reason-input') !== -1 && armedHtml.indexOf('data-action="block-confirm"') !== -1 &&
+    armedHtml.indexOf('data-action="block-cancel"') !== -1);
+  const blockedHtml = Core.renderBlockActionHtml({ biomId: 'B', deleted: false, blocked: true, blockedTs: 1764200000000, blockedReason: 'Chargeback abuse' }, { adminKeyPresent: true });
+  check('V78 BLOCK a blocked person shows the badge, when + why, and the devices-stay-revoked unblock copy',
+    blockedHtml.indexOf('Blocked') !== -1 && blockedHtml.indexOf('Chargeback abuse') !== -1 &&
+    blockedHtml.indexOf('data-action="unblock-arm"') !== -1 && blockedHtml.indexOf('devices stay revoked') !== -1);
+  const blockedRows = Core.renderBanksRowsHtml([{ biomId: 'B', name: 'n', hand: 'left', edccCount: 1, neuralCount: 1, version: 1, deleted: false, blocked: true }]);
+  check('V78 BLOCK the banks table flags a blocked person with a badge',
+    blockedRows.indexOf('badge badge-denied">Blocked<') !== -1);
+  const logHtml = Core.renderAdminLogHtml([
+    { id: 'a1', ts: 1764200000000, action: 'block', biomId: 'TSG-BIO-2841', reason: 'Chargeback abuse', revokedDeviceIds: ['dev-1'] },
+    { id: 'a2', ts: 1764300000000, action: 'unblock', biomId: 'TSG-BIO-2841', reason: '', revokedDeviceIds: [] }
+  ]);
+  check('V78 the admin log renders actions, reasons and revoked-device counts; empty log reads intentionally',
+    logHtml.indexOf('Chargeback abuse') !== -1 && logHtml.indexOf('>Block</span>') !== -1 && logHtml.indexOf('>Unblock</span>') !== -1 &&
+    Core.renderAdminLogHtml([]).indexOf('No block or unblock has been recorded yet.') !== -1);
+  const adminCalls = [];
+  const adminFetch = function (url, opts) {
+    adminCalls.push({ url: url, opts: opts });
+    if (url.indexOf('/api/admin/log') !== -1) return Promise.resolve({ status: 200, ok: true, json: function () { return Promise.resolve({ ok: true, count: 0, entries: [] }); } });
+    return Promise.resolve({ status: 200, ok: true, json: function () { return Promise.resolve({ ok: true, biomId: 'TSG-BIO-2841', blocked: true, revokedDeviceIds: ['dev-1'] }); } });
+  };
+  const blockRes = await Core.adminBlock('https://api.test/', 'admin-key-1', 'TSG-BIO-2841', 'Chargeback abuse', adminFetch);
+  check('V78 ADMIN block posts to /api/admin/block with the admin key in the header only',
+    blockRes.blocked === true && adminCalls[0].url === 'https://api.test/api/admin/block' &&
+    adminCalls[0].opts.headers['x-admin-key'] === 'admin-key-1' && adminCalls[0].url.indexOf('admin-key-1') === -1 &&
+    JSON.parse(adminCalls[0].opts.body).reason === 'Chargeback abuse');
+  const logEntries = await Core.adminLog('https://api.test', 'admin-key-1', adminFetch);
+  check('V78 ADMIN the log reads via GET with the admin key and returns the entries array',
+    Array.isArray(logEntries) && adminCalls[1].opts.method === 'GET');
+  let notConfigured = null;
+  try {
+    await Core.adminBlock('https://api.test', 'admin-key-1', 'B', '', function () {
+      return Promise.resolve({ status: 503, ok: false, json: function () { return Promise.resolve({ error: 'admin not configured', adminConfigured: false }); } });
+    });
+  } catch (e) { notConfigured = e; }
+  check('V78 ADMIN a 503 keeps its body on the error so the UI can say "not configured" (never fail open)',
+    !!notConfigured && notConfigured.status === 503 && notConfigured.body.adminConfigured === false);
 
   console.log('\n' + (fail === 0 ? 'ALL DASHBOARD TESTS PASSED (' + pass + ')' : fail + ' FAILURES, ' + pass + ' passed'));
   process.exit(fail === 0 ? 0 : 1);

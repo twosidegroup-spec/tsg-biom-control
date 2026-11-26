@@ -31,9 +31,10 @@
       </div>
     </div>
     <nav class="side-nav" aria-label="Sections">
-      <a class="side-nav-link" href="#overviewSection"><span>Overview</span></a>
-      <a class="side-nav-link" href="#banksSection"><span>Palm Banks</span></a>
-      <a class="side-nav-link" href="#scansSection"><span>Scan Log</span></a>
+      <a class="side-nav-link" href="#overviewSection"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.8"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.8"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.8"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.8"/></svg><span>Overview</span></a>
+      <a class="side-nav-link" href="#banksSection"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"/><path d="M9.3 12.1a2.8 2.8 0 1 1 .7 2.3"/><path d="M12 12.3v1.9"/></svg><span>Palm Banks</span></a>
+      <a class="side-nav-link" href="#scansSection"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M8.5 6h11M8.5 12h11M8.5 18h11"/><circle cx="4.4" cy="6" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.4" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.4" cy="18" r="1.2" fill="currentColor" stroke="none"/></svg><span>Scan Log</span></a>
+      <a class="side-nav-link" href="#" id="settingsNavLink"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="3.1"/><path d="M12 3v2.6M12 18.4V21M3 12h2.6M18.4 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8"/></svg><span>Settings</span></a>
     </nav>
     <div class="session-block">
       <div class="topbar-actions" id="topbarActions" hidden>
@@ -60,6 +61,7 @@
         <div class="brand-mark">TSG</div>
         <p class="auth-brand-name">TSG Biom Control</p>
         <p class="auth-brand-sub">TwoSide Group &middot; Palm Biometric Console</p>
+        <svg class="auth-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="0.9" stroke-linecap="round"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"/><path d="M9.3 12.1a2.8 2.8 0 1 1 .7 2.3"/><path d="M12 12.3v1.9"/></svg>
       </div>
       <div class="card setup-card">
       <h2>Locked</h2>
@@ -83,56 +85,111 @@
     </div>
   </section>
 
-  <!-- ============ SETUP ============ -->
-  <section id="setupView" class="setup-wrap" hidden>
-    <div class="auth-split">
-      <div class="auth-brand" aria-hidden="true">
-        <div class="brand-mark">TSG</div>
-        <p class="auth-brand-name">TSG Biom Control</p>
-        <p class="auth-brand-sub">TwoSide Group &middot; Palm Biometric Console</p>
+  <!-- ============ FIRST RUN (v78: quiet notice, NOT a form) ============
+       The connection setup no longer fronts the dashboard. With no
+       seal on this browser the front door is this one-line notice;
+       the form itself lives in Settings (below), reached from here
+       on first run and from the sidebar afterwards. -->
+  <section id="firstRunView" class="setup-wrap" hidden>
+    <div class="card firstrun-note">
+      <svg class="note-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="3.1"/><path d="M12 3v2.6M12 18.4V21M3 12h2.6M18.4 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8"/></svg>
+      <h2>Not connected yet</h2>
+      <p class="muted" id="firstRunTextFresh">
+        This browser has not been connected to your TSG Biom API yet.
+        The one-time connection setup lives in Settings.
+      </p>
+      <p class="muted" id="firstRunTextMigrate" hidden>
+        This browser still holds your read key from an earlier version, stored in plain text.
+        Open Settings to protect it with your dashboard password — the plain-text copy is
+        deleted the moment the seal is written.
+      </p>
+      <button type="button" class="btn btn-primary" id="firstRunSettingsBtn">Open Settings</button>
+    </div>
+  </section>
+
+  <!-- ============ SETTINGS (v78) ============
+       The Connection section holds the endpoint, the read key and
+       the admin key. All three are sealed under the dashboard
+       password exactly like the read key always was (AES-GCM,
+       PBKDF2) — per origin, never in plain text. Modes: fresh
+       (first run), migrate (pre-v63 plaintext found), manage
+       (opened from inside the unlocked dashboard; saving re-seals
+       under the current password, which is re-entered to prove it). -->
+  <section id="settingsView" hidden>
+    <h2 class="section-title">Settings</h2>
+    <div class="settings-stack">
+      <div class="card panel settings-card">
+        <div class="panel-head"><h3>Connection</h3></div>
+        <p class="muted" id="setupIntroFresh">
+          This dashboard reads the scan records and palm banks your phone syncs to your own
+          TSG Biom API. Enter the API endpoint and the <strong>read key</strong> you set on the server,
+          and choose the <strong>dashboard password</strong> that will protect them on this browser.
+          This is a one-time setup — every later visit asks only for the password.
+        </p>
+        <p class="muted" id="setupIntroMigrate" hidden>
+          This browser already holds your read key from an earlier version, stored in plain text.
+          Set your <strong>dashboard password</strong> now and the key is sealed under it — the
+          plain-text copy is deleted, and every later visit asks only for the password.
+        </p>
+        <p class="muted" id="setupIntroManage" hidden>
+          These are the credentials sealed on this browser. Leave a key field blank to keep the
+          saved value. Saving re-seals everything under your dashboard password, which you
+          re-enter below to prove it is you.
+        </p>
+        <form id="setupForm" autocomplete="off">
+          <label class="field" id="fieldEndpointWrap">
+            <span>API endpoint</span>
+            <input type="url" id="endpointInput" value="https://tsg-biom-api.vercel.app"
+                   placeholder="https://tsg-biom-api.vercel.app" required spellcheck="false">
+          </label>
+          <label class="field" id="fieldKeyWrap">
+            <span>Read key</span>
+            <input type="password" id="readKeyInput" placeholder="Your READ_KEY" required spellcheck="false">
+          </label>
+          <label class="field" id="fieldAdminWrap">
+            <span>Admin key <span class="field-optional">(optional — enables Block / Unblock)</span></span>
+            <input type="password" id="adminKeyInput" placeholder="Your BIOM_ADMIN_KEY" spellcheck="false">
+            <span class="field-note" id="adminKeyState"></span>
+          </label>
+          <label class="field" id="fieldAdminRemoveWrap" hidden>
+            <span class="checkline">
+              <input type="checkbox" id="adminKeyRemoveInput">
+              Remove the saved admin key from this browser
+            </span>
+          </label>
+          <label class="field">
+            <span id="passwordLabel">Dashboard password</span>
+            <input type="password" id="passwordInput" placeholder="The password for this dashboard" required spellcheck="false">
+          </label>
+          <label class="field" id="fieldConfirmWrap">
+            <span>Repeat the password</span>
+            <input type="password" id="passwordConfirmInput" placeholder="Type it again" required spellcheck="false">
+          </label>
+          <p class="form-error" id="setupError" role="alert" hidden></p>
+          <button type="submit" class="btn btn-primary btn-block" id="connectBtn">Connect</button>
+        </form>
+        <p class="fineprint">
+          The endpoint and keys are stored only in this browser, sealed — encrypted under your
+          dashboard password (AES-GCM, PBKDF2) — never in plain text, and sent only to your API.
+          Disconnect clears them. Palm template contents are never displayed here.
+          This build's security policy allows connections to the TSG Biom API only.
+        </p>
       </div>
-      <div class="card setup-card">
-      <h2 id="setupHeading">Connect to your TSG Biom API</h2>
-      <p class="muted" id="setupIntroFresh">
-        This dashboard reads the scan records and palm banks your phone syncs to your own
-        TSG Biom API. Enter the API endpoint and the <strong>read key</strong> you set on the server,
-        and choose the <strong>dashboard password</strong> that will protect them on this browser.
-        This is a one-time setup — every later visit asks only for the password.
-      </p>
-      <p class="muted" id="setupIntroMigrate" hidden>
-        This browser already holds your read key from an earlier version, stored in plain text.
-        Set your <strong>dashboard password</strong> now and the key is sealed under it — the
-        plain-text copy is deleted, and every later visit asks only for the password.
-      </p>
-      <form id="setupForm" autocomplete="off">
-        <label class="field" id="fieldEndpointWrap">
-          <span>API endpoint</span>
-          <input type="url" id="endpointInput" value="https://tsg-biom-api.vercel.app"
-                 placeholder="https://tsg-biom-api.vercel.app" required spellcheck="false">
-        </label>
-        <label class="field" id="fieldKeyWrap">
-          <span>Read key</span>
-          <input type="password" id="readKeyInput" placeholder="Your READ_KEY" required spellcheck="false">
-        </label>
-        <label class="field">
-          <span>Dashboard password</span>
-          <input type="password" id="passwordInput" placeholder="The password for this dashboard" required spellcheck="false">
-        </label>
-        <label class="field">
-          <span>Repeat the password</span>
-          <input type="password" id="passwordConfirmInput" placeholder="Type it again" required spellcheck="false">
-        </label>
-        <p class="form-error" id="setupError" role="alert" hidden></p>
-        <button type="submit" class="btn btn-primary btn-block" id="connectBtn">Connect</button>
-      </form>
-      <p class="fineprint">
-        The endpoint and key are stored only in this browser, sealed — encrypted under your
-        dashboard password (AES-GCM, PBKDF2) — never in plain text, and sent only to your API.
-        Disconnect clears them. Palm template contents are never displayed here.
-        In this build the dashboard connects only to the TSG Biom API — the endpoint above is
-        fixed for this build.
-      </p>
+
+      <div class="card panel settings-card" id="adminActivityCard" hidden>
+        <div class="panel-head">
+          <h3>Admin activity</h3>
+          <button type="button" class="btn btn-light" id="adminLogRefreshBtn">Refresh log</button>
+        </div>
+        <p class="muted">
+          Every block and unblock is recorded on the server in an append-only log.
+          Unblocking restores a person's sync and payments, but their devices stay
+          revoked — re-registering a device is the path back.
+        </p>
+        <div id="adminLogBody"></div>
       </div>
+
+      <p><button type="button" class="btn btn-light" id="settingsBackBtn" hidden>Back to dashboard</button></p>
     </div>
   </section>
 
@@ -292,9 +349,10 @@
 
 <!-- ============ BOTTOM NAV (mobile) ============ -->
 <nav class="bottom-nav" aria-label="Sections">
-  <a class="bottom-nav-link" href="#overviewSection">Overview</a>
-  <a class="bottom-nav-link" href="#banksSection">Banks</a>
-  <a class="bottom-nav-link" href="#scansSection">Scans</a>
+  <a class="bottom-nav-link" href="#overviewSection"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.8"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.8"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.8"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.8"/></svg><span>Overview</span></a>
+  <a class="bottom-nav-link" href="#banksSection"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"/><path d="M9.3 12.1a2.8 2.8 0 1 1 .7 2.3"/><path d="M12 12.3v1.9"/></svg><span>Banks</span></a>
+  <a class="bottom-nav-link" href="#scansSection"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M8.5 6h11M8.5 12h11M8.5 18h11"/><circle cx="4.4" cy="6" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.4" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.4" cy="18" r="1.2" fill="currentColor" stroke="none"/></svg><span>Scans</span></a>
+  <a class="bottom-nav-link" href="#" id="bottomSettingsLink"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="3.1"/><path d="M12 3v2.6M12 18.4V21M3 12h2.6M18.4 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8"/></svg><span>Settings</span></a>
 </nav>
 
 <script src="app.js"></script>

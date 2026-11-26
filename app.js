@@ -22,6 +22,17 @@
  * holds the pre-v63 plaintext key is migrated: set the password
  * once, the key is sealed, the plaintext is deleted.
  *
+ * v78: the connection setup no longer fronts the dashboard. It
+ * lives in a Settings page (Connection section: endpoint, read
+ * key, and the new ADMIN key — all sealed under the same
+ * password) reached from a quiet first-run notice when no seal
+ * exists, and from the sidebar once unlocked. The front door is
+ * the password-only lock whenever a seal exists. The person
+ * view gains the server-stamped network capture, the palm as a
+ * sealed-bank fingerprint (code, never an image — none exists),
+ * the wallet ledger mirror, and Block/Unblock control backed
+ * by the API's admin endpoints.
+ *
  * The pure core (fetch, stats, filtering, HTML rendering, and
  * the seal/unseal crypto) is kept free of DOM access and
  * exported as window.TsgBiomCore (and as a Node module when
@@ -78,6 +89,25 @@
       return dhakaFmt.format(new Date(ts));
     } catch (e) {
       return new Date(ts).toISOString();
+    }
+  }
+
+  /* v78: compact timestamp for narrow surfaces (the dossier's
+     tables) — day + time to the minute, no year/seconds. */
+  var dhakaShortFmt = null;
+  function fmtDhakaShort(ts) {
+    if (typeof ts !== 'number' || !Number.isFinite(ts)) return '—';
+    try {
+      if (!dhakaShortFmt) {
+        dhakaShortFmt = new Intl.DateTimeFormat('en-GB', {
+          timeZone: 'Asia/Dhaka',
+          day: '2-digit', month: 'short',
+          hour: '2-digit', minute: '2-digit', hour12: false
+        });
+      }
+      return dhakaShortFmt.format(new Date(ts));
+    } catch (e) {
+      return fmtDhaka(ts);
     }
   }
 
@@ -152,14 +182,14 @@
   /* ---------------- rendering (HTML strings) ---------------- */
 
   function renderStatsHtml(stats) {
-    function card(label, value, sub, small) {
-      return '<div class="stat"><div class="stat-label">' + esc(label) + '</div>' +
+    function card(label, value, sub, small, tone) {
+      return '<div class="stat' + (tone ? ' tone-' + tone : '') + '"><div class="stat-label">' + esc(label) + '</div>' +
         '<div class="stat-value' + (small ? ' small' : '') + '">' + esc(value) + '</div>' +
         (sub ? '<div class="stat-sub">' + esc(sub) + '</div>' : '') + '</div>';
     }
     return card('Total scans', stats.totalScans, 'records synced') +
-      card('Verified', stats.verified, 'accepted scans') +
-      card('Denied', stats.denied, 'refused scans') +
+      card('Verified', stats.verified, 'accepted scans', false, 'ok') +
+      card('Denied', stats.denied, 'refused scans', false, 'bad') +
       card('Enrolled profiles', stats.profiles, 'palm banks synced') +
       card('Last scan', stats.lastScanTs === null ? '—' : fmtDhaka(stats.lastScanTs), 'Asia/Dhaka', true);
   }
@@ -264,7 +294,9 @@
       var c = profileCounts(p);
       var status = p.deleted === true
         ? '<span class="badge badge-denied">Removed</span>'
-        : '<span class="badge badge-verified">Live</span>';
+        : '<span class="badge badge-verified">Live</span>' +
+          /* v78: a blocked person is flagged wherever their bank is listed */
+          (p.blocked === true ? ' <span class="badge badge-denied">Blocked</span>' : '');
       return '<tr data-biom-id="' + esc(p.biomId || '') + '">' +
         '<td data-label="Biom ID">' + esc(p.biomId || '') + '</td>' +
         '<td data-label="Name"><span class="profile-name">' + esc(p.deleted === true ? 'Removed' : (p.name || 'Unnamed profile')) + '</span></td>' +
@@ -322,18 +354,18 @@
     html += '<article class="profile-card detail-card">' +
       '<h3>Scan history</h3>' +
       (mine.length
-        ? '<table class="scans-table mini-table"><thead><tr>' +
+        ? '<div class="table-wrap table-wrap-plain drawer-scroll"><table class="scans-table mini-table"><thead><tr>' +
           '<th scope="col">Time (Dhaka)</th><th scope="col">Kind</th><th scope="col">Result</th><th scope="col">Duration</th>' +
           '</tr></thead><tbody>' +
           mine.slice(0, 50).map(function (s) {
             return '<tr>' +
-              '<td class="time">' + esc(fmtDhaka(s.ts)) + '</td>' +
+              '<td class="time">' + esc(fmtDhakaShort(s.ts)) + '</td>' +
               '<td>' + esc(kindLabel(s.kind)) + '</td>' +
               '<td>' + resultBadgeHtml(s.result) + '</td>' +
               '<td>' + durationHtml(s) + '</td>' +
               '</tr>';
           }).join('') +
-          '</tbody></table>'
+          '</tbody></table></div>'
         : '<p class="empty-note">No scans recorded for this person yet.</p>') +
       '</article>';
     return html;
@@ -391,6 +423,216 @@
     return out;
   }
 
+  /* ---------------- v78: person control view ----------------
+     Network capture, the palm as an encrypted CODE, and the
+     wallet ledger. Everything renders from the FULL summary the
+     API serves only to the read key (v78): regIp/lastIp + geo,
+     bankFingerprint + template sizes, the wallet mirror and the
+     Biom Pay records. A summary from an older API (or a person
+     whose phone has not synced on the v78 build yet) simply
+     lacks those fields — the cards then say so plainly instead
+     of inventing values. There is no palm image anywhere in
+     this system; nothing image-like is ever rendered. */
+
+  function fmtMoney(v) {
+    if (typeof v !== 'number' || !Number.isFinite(v)) return '—';
+    return 'BDT ' + v.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+  }
+
+  /* '203.0.113.7 · Dhaka, BD' — any missing part drops out;
+     nothing captured at all reads 'Not captured'. */
+  function netLine(ip, country, city) {
+    var place = [city, country].filter(function (x) { return !!x; }).join(', ');
+    var parts = [];
+    if (ip) parts.push(String(ip));
+    if (place) parts.push(place);
+    return parts.length ? parts.join(' · ') : 'Not captured';
+  }
+
+  /* The latest network sighting for a person: the profile's own
+     last-write stamp vs the newest scan record carrying an IP —
+     whichever is newer wins. */
+  function latestNet(p, scans) {
+    var best = null;
+    if (p && p.lastIp) best = { ip: p.lastIp, country: p.lastGeoCountry || '', city: p.lastGeoCity || '', ts: typeof p.updatedTs === 'number' ? p.updatedTs : 0 };
+    (scans || []).forEach(function (s) {
+      if (!s || s.biomId !== (p && p.biomId) || !s.ip) return;
+      if (!best || (s.ts || 0) >= best.ts) {
+        best = { ip: s.ip, country: s.geoCountry || '', city: s.geoCity || '', ts: s.ts || 0 };
+      }
+    });
+    return best;
+  }
+
+  function walletTotals(p) {
+    var w = (p && p.wallet) || null;
+    var t = { balance: w && typeof w.balance === 'number' ? w.balance : null, added: 0, sent: 0, received: 0, paid: 0 };
+    if (w && Array.isArray(w.statement)) {
+      w.statement.forEach(function (e) {
+        if (!e || typeof e.amount !== 'number') return;
+        if (e.kind === 'add') t.added += e.amount;
+        else if (e.kind === 'send') t.sent += e.amount;
+        else if (e.kind === 'receive') t.received += e.amount;
+      });
+    }
+    if (p && Array.isArray(p.pays)) {
+      p.pays.forEach(function (x) {
+        if (x && typeof x.amount === 'number' && (!x.status || x.status === 'Completed')) t.paid += x.amount;
+      });
+    }
+    return t;
+  }
+
+  function renderPersonControlHtml(p, scans) {
+    if (!p || p.deleted === true) return '';
+    var html = '';
+
+    /* --- network: registration + latest seen --- */
+    var latest = latestNet(p, scans);
+    html += '<article class="profile-card detail-card">' +
+      '<h3>Network</h3>' +
+      '<dl class="profile-meta">' +
+      '<div><dt>Registered from</dt><dd>' + esc(netLine(p.regIp, p.regGeoCountry, p.regGeoCity)) + '</dd></div>' +
+      '<div><dt>Latest seen</dt><dd>' + esc(latest ? netLine(latest.ip, latest.country, latest.city) : 'Not captured') + '</dd></div>' +
+      (latest && latest.ts ? '<div><dt>Latest seen at</dt><dd>' + esc(fmtDhaka(latest.ts)) + '</dd></div>' : '') +
+      '</dl>' +
+      ((p.regIp || latest) ? '' : '<p class="fineprint">IP and coarse location are stamped by the server when records arrive. They appear here after this person\'s phone next syncs on the v78 build.</p>') +
+      '</article>';
+
+    /* --- palm as CODE: the sealed-bank fingerprint --- */
+    var counts = profileCounts(p);
+    html += '<article class="profile-card detail-card">' +
+      '<h3>Palm — encrypted code</h3>';
+    if (p.bankFingerprint) {
+      html += '<dl class="profile-meta">' +
+        '<div><dt>Envelope</dt><dd>' + esc(p.enc === 'v1' ? 'enc.v1 (sealed)' : 'encoded') + '</dd></div>' +
+        '<div><dt>Templates</dt><dd>' + counts.edcc + ' EDCC · ' + counts.emb + ' PalmNet</dd></div>' +
+        (typeof p.edccBytes === 'number' ? '<div><dt>EDCC template size</dt><dd>' + p.edccBytes + ' bytes (sealed)</dd></div>' : '') +
+        (typeof p.neuralDims === 'number' ? '<div><dt>PalmNet vector</dt><dd>' + p.neuralDims + ' dimensions (sealed)</dd></div>' : '') +
+        '</dl>' +
+        '<p class="field-note">Bank fingerprint (SHA-256 of the sealed bank)</p>' +
+        '<p class="mono">' + esc(p.bankFingerprint) + '</p>' +
+        '<p class="fineprint">This fingerprint identifies the sealed template bank and changes whenever the bank changes. It cannot be turned back into a palm — no palm image exists anywhere in this system.</p>';
+    } else {
+      html += '<p class="fineprint">The bank fingerprint appears here once the API runs the v78 build. The palm itself is never shown — it exists only as sealed template code.</p>';
+    }
+    html += '</article>';
+
+    /* --- wallet: balance + full ledger --- */
+    var totals = walletTotals(p);
+    html += '<article class="profile-card detail-card">' +
+      '<h3>Wallet</h3>';
+    if (p.wallet && typeof p.wallet.balance === 'number') {
+      var rows = [];
+      (p.wallet.statement || []).forEach(function (e) {
+        if (!e) return;
+        var detail = '', sign = '';
+        if (e.kind === 'add') { detail = 'Add money' + (e.accountLabel ? ' · ' + e.accountLabel : ''); sign = '+'; }
+        else if (e.kind === 'send') { detail = 'Send money → ' + (e.counterpartyName || '—') + (e.counterpartyId ? ' (' + e.counterpartyId + ')' : ''); sign = '−'; }
+        else if (e.kind === 'receive') { detail = 'Received ← ' + (e.counterpartyName || '—') + (e.counterpartyId ? ' (' + e.counterpartyId + ')' : ''); sign = '+'; }
+        else return;
+        rows.push({ ts: e.ts || 0, detail: detail, amount: sign + fmtMoney(e.amount), after: typeof e.balanceAfter === 'number' ? fmtMoney(e.balanceAfter) : '—' });
+      });
+      (p.pays || []).forEach(function (x) {
+        if (!x) return;
+        rows.push({
+          ts: x.ts || 0,
+          detail: 'Biom Pay · ' + (x.store || '—') + (x.provider ? ' · ' + x.provider : '') + (x.status && x.status !== 'Completed' ? ' · ' + x.status : ''),
+          amount: '−' + fmtMoney(x.amount), after: '—'
+        });
+      });
+      rows.sort(function (a, b) { return b.ts - a.ts; });
+      html += '<p class="wallet-balance">' + esc(fmtMoney(totals.balance)) + '</p>' +
+        '<dl class="profile-meta">' +
+        '<div><dt>Total added</dt><dd>' + esc(fmtMoney(totals.added)) + '</dd></div>' +
+        '<div><dt>Total sent</dt><dd>' + esc(fmtMoney(totals.sent)) + '</dd></div>' +
+        '<div><dt>Total received</dt><dd>' + esc(fmtMoney(totals.received)) + '</dd></div>' +
+        '<div><dt>Total paid (Biom Pay)</dt><dd>' + esc(fmtMoney(totals.paid)) + '</dd></div>' +
+        '</dl>' +
+        (rows.length
+          ? '<p class="field-note">' + rows.length + (rows.length === 1 ? ' entry' : ' entries') + ', newest first</p>' +
+            '<div class="ledger-list">' +
+            rows.map(function (r) {
+              return '<div class="ledger-row">' +
+                '<div class="ledger-main"><span class="ledger-detail">' + esc(r.detail) + '</span>' +
+                '<span class="ledger-amount num">' + esc(r.amount) + '</span></div>' +
+                '<div class="ledger-sub"><span>' + esc(fmtDhaka(r.ts)) + '</span>' +
+                (r.after !== '—' ? '<span>Balance after ' + esc(r.after) + '</span>' : '') +
+                '</div></div>';
+            }).join('') +
+            '</div>'
+          : '<p class="empty-note">No wallet activity recorded yet.</p>') +
+        '<p class="fineprint">The ledger mirrors the wallet statement the app keeps on the phone (same running balance), plus the Biom Pay records. It appears here after the phone syncs on the v78 build.</p>';
+    } else {
+      html += '<p class="fineprint">Wallet records appear here after this person\'s phone next syncs on the v78 build — the wallet statement has always lived on the device and now mirrors to your API with each sync.</p>';
+    }
+    html += '</article>';
+    return html;
+  }
+
+  /* The Block / Unblock control inside the person drawer.
+     ui = { adminKeyPresent, armed, busy, message, tone }.
+     Buttons carry data-action attributes; the wiring owns the
+     clicks and re-renders this block on every state change. */
+  function renderBlockActionHtml(p, ui) {
+    if (!p || p.deleted === true) return '';
+    ui = ui || {};
+    var msg = ui.message
+      ? (ui.tone === 'err'
+        ? '<p class="form-error" role="alert">' + esc(ui.message) + '</p>'
+        : '<p class="ok-note" role="status">' + esc(ui.message) + '</p>')
+      : '';
+    var open = '<article class="profile-card detail-card"><h3>Access control</h3>';
+    if (!ui.adminKeyPresent) {
+      return open +
+        '<p class="fineprint">Blocking is not set up on this browser yet. Add the <strong>admin key</strong> in Settings → Connection to enable Block / Unblock here.</p>' +
+        '<button type="button" class="btn btn-light" data-action="open-settings">Open Settings</button>' +
+        msg + '</article>';
+    }
+    if (p.blocked === true) {
+      return open +
+        '<p><span class="badge badge-denied">Blocked</span></p>' +
+        '<dl class="profile-meta">' +
+        (p.blockedTs ? '<div><dt>Blocked at</dt><dd>' + esc(fmtDhaka(p.blockedTs)) + '</dd></div>' : '') +
+        (p.blockedReason ? '<div><dt>Reason</dt><dd>' + esc(p.blockedReason) + '</dd></div>' : '') +
+        '</dl>' +
+        '<p class="fineprint">While blocked, this person\'s sync writes and payments are refused. Unblocking restores sync and payments — but their devices stay revoked, and re-registering a device is the path back.</p>' +
+        (ui.armed
+          ? '<button type="button" class="btn btn-primary" data-action="unblock-confirm"' + (ui.busy ? ' disabled' : '') + '>' + (ui.busy ? 'Working…' : 'Confirm unblock') + '</button> ' +
+            '<button type="button" class="btn btn-light" data-action="block-cancel"' + (ui.busy ? ' disabled' : '') + '>Cancel</button>'
+          : '<button type="button" class="btn btn-light" data-action="unblock-arm"' + (ui.busy ? ' disabled' : '') + '>Unblock this person</button>') +
+        msg + '</article>';
+    }
+    return open +
+      '<p class="fineprint">Blocking flags this Biom ID and revokes the person\'s devices at once. The API then refuses their sync writes and payments with a clear blocked error, and the app shows “This account has been blocked”. The action is recorded in the admin log (Settings → Admin activity).</p>' +
+      (ui.armed
+        ? '<label class="field"><span>Reason (optional)</span>' +
+          '<input type="text" class="block-reason-input" placeholder="Why is this person blocked?" maxlength="280" spellcheck="false"></label>' +
+          '<button type="button" class="btn btn-danger" data-action="block-confirm"' + (ui.busy ? ' disabled' : '') + '>' + (ui.busy ? 'Working…' : 'Confirm block') + '</button> ' +
+          '<button type="button" class="btn btn-light" data-action="block-cancel"' + (ui.busy ? ' disabled' : '') + '>Cancel</button>'
+        : '<button type="button" class="btn btn-danger" data-action="block-arm"' + (ui.busy ? ' disabled' : '') + '>Block this person</button>') +
+      msg + '</article>';
+  }
+
+  function renderAdminLogHtml(entries) {
+    if (!Array.isArray(entries) || !entries.length) {
+      return '<p class="empty-note">No block or unblock has been recorded yet.</p>';
+    }
+    return '<table class="scans-table mini-table"><thead><tr>' +
+      '<th scope="col">When (Dhaka)</th><th scope="col">Action</th><th scope="col">Biom ID</th><th scope="col">Reason</th><th scope="col">Devices revoked</th>' +
+      '</tr></thead><tbody>' +
+      entries.map(function (e) {
+        return '<tr>' +
+          '<td class="time">' + esc(fmtDhaka(e.ts)) + '</td>' +
+          '<td>' + (e.action === 'block' ? '<span class="badge badge-denied">Block</span>' : '<span class="badge badge-verified">Unblock</span>') + '</td>' +
+          '<td>' + esc(e.biomId || '') + '</td>' +
+          '<td>' + esc(e.reason || '—') + '</td>' +
+          '<td class="num">' + esc(Array.isArray(e.revokedDeviceIds) ? e.revokedDeviceIds.length : 0) + '</td>' +
+          '</tr>';
+      }).join('') +
+      '</tbody></table>';
+  }
+
   /* ---------------- API ---------------- */
 
   function apiError(status, message) {
@@ -425,6 +667,46 @@
         profiles: Array.isArray(r[1].profiles) ? r[1].profiles : []
       };
     });
+  }
+
+  /* ---------------- v78: admin API (Block / Unblock / log) ----
+     Gated server-side by BIOM_ADMIN_KEY; the dashboard sends the
+     admin key (unsealed from the same password seal as the read
+     key) in the x-admin-key header only. Errors keep the parsed
+     body on err.body so the UI can tell "not configured" (503)
+     from "key refused" (401) from "blocked" states. */
+  function adminFetch(endpoint, adminKey, path, body, fetchFn) {
+    var f = fetchFn || (typeof fetch !== 'undefined' ? fetch : null);
+    if (!f) return Promise.reject(apiError(0, 'fetch is not available'));
+    var base = String(endpoint || '').replace(/\/+$/, '');
+    var opts = { method: body ? 'POST' : 'GET', headers: { 'x-admin-key': adminKey, 'Accept': 'application/json' } };
+    if (body) {
+      opts.headers['Content-Type'] = 'application/json';
+      opts.body = JSON.stringify(body);
+    }
+    return f(base + path, opts).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (json) {
+        if (!res.ok) {
+          var e = apiError(res.status, (json && json.error) || ('HTTP ' + res.status));
+          e.body = json || {};
+          throw e;
+        }
+        return json;
+      });
+    });
+  }
+
+  function adminBlock(endpoint, adminKey, biomId, reason, fetchFn) {
+    return adminFetch(endpoint, adminKey, '/api/admin/block', { biomId: biomId, reason: reason || '' }, fetchFn);
+  }
+
+  function adminUnblock(endpoint, adminKey, biomId, fetchFn) {
+    return adminFetch(endpoint, adminKey, '/api/admin/unblock', { biomId: biomId }, fetchFn);
+  }
+
+  function adminLog(endpoint, adminKey, fetchFn) {
+    return adminFetch(endpoint, adminKey, '/api/admin/log', null, fetchFn)
+      .then(function (json) { return Array.isArray(json.entries) ? json.entries : []; });
   }
 
   /* ---------------- credential seal (v63) -----------------------
@@ -471,7 +753,10 @@
     var salt = crypto.getRandomValues(new Uint8Array(16));
     var iv = crypto.getRandomValues(new Uint8Array(12));
     return deriveSealKey(subtle, password, salt, PBKDF2_ITERATIONS).then(function (key) {
-      var payload = JSON.stringify({ endpoint: creds.endpoint, readKey: creds.readKey });
+      /* v78: the admin key (Block/Unblock control) rides the
+         same seal as the read key — same password, same
+         per-origin storage, never plain text. Absent = ''. */
+      var payload = JSON.stringify({ endpoint: creds.endpoint, readKey: creds.readKey, adminKey: creds.adminKey || '' });
       return subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, new TextEncoder().encode(payload));
     }).then(function (ct) {
       return {
@@ -494,7 +779,10 @@
       .then(function (pt) {
         var obj = JSON.parse(new TextDecoder().decode(pt));
         if (!obj || !obj.readKey) throw new Error('Sealed credential is incomplete');
-        return { endpoint: obj.endpoint || DEFAULT_ENDPOINT, readKey: obj.readKey };
+        /* v78: seals written before v78 carry no adminKey — they
+           open with an empty one (blocking simply stays unset up
+           until the key is added in Settings). */
+        return { endpoint: obj.endpoint || DEFAULT_ENDPOINT, readKey: obj.readKey, adminKey: obj.adminKey || '' };
       });
   }
 
@@ -506,6 +794,7 @@
     esc: esc,
     fmtScore: fmtScore,
     fmtDhaka: fmtDhaka,
+    fmtDhakaShort: fmtDhakaShort,
     kindLabel: kindLabel,
     handLabel: handLabel,
     classifyResult: classifyResult,
@@ -525,6 +814,16 @@
     renderRecentScansRowsHtml: renderRecentScansRowsHtml,
     renderVaultHealthHtml: renderVaultHealthHtml,
     renderScanCardsHtml: renderScanCardsHtml,
+    fmtMoney: fmtMoney,
+    netLine: netLine,
+    latestNet: latestNet,
+    walletTotals: walletTotals,
+    renderPersonControlHtml: renderPersonControlHtml,
+    renderBlockActionHtml: renderBlockActionHtml,
+    renderAdminLogHtml: renderAdminLogHtml,
+    adminBlock: adminBlock,
+    adminUnblock: adminUnblock,
+    adminLog: adminLog,
     fetchJson: fetchJson,
     loadAll: loadAll
   };
@@ -543,7 +842,9 @@
      does nothing while locked, so no API call can happen
      before the password unlocks the seal. */
   var sessionCreds = null;
-  var setupMode = 'fresh'; // 'fresh' | 'migrate' (pre-v63 plaintext key found)
+  var setupMode = 'fresh'; // 'fresh' | 'migrate' (pre-v63 plaintext) | 'manage' (v78 Settings, unlocked)
+  /* v78: the drawer Block/Unblock control's transient state. */
+  var drawerUi = { biomId: '', armed: false, busy: false, message: '', tone: '' };
 
   function $(id) { return document.getElementById(id); }
 
@@ -581,23 +882,73 @@
     } catch (e) { /* storage unavailable */ }
   }
 
-  function showSetup(message, mode) {
+  function hideAllViews() {
+    els.lockView.hidden = true;
+    els.firstRunView.hidden = true;
+    els.settingsView.hidden = true;
+    els.mainView.hidden = true;
+  }
+
+  /* v78: the front door when NO seal exists is a quiet notice —
+     never the setup form. The form lives in Settings; this
+     notice is the only path to it before a seal exists. */
+  function showFirstRun(mode) {
     stopAutoRefresh();
     setupMode = mode || 'fresh';
-    els.lockView.hidden = true;
-    els.setupView.hidden = false;
-    els.mainView.hidden = true;
+    hideAllViews();
+    els.firstRunView.hidden = false;
     els.topbarActions.hidden = true;
     var migrate = setupMode === 'migrate';
+    els.firstRunTextFresh.hidden = migrate;
+    els.firstRunTextMigrate.hidden = !migrate;
+  }
+
+  /* v78: the Settings page. mode 'fresh' | 'migrate' | 'manage'.
+     In manage mode the session is live (topbar stays, Back shows,
+     Admin activity loads); the form edits the sealed credentials
+     and saving re-seals under the re-entered current password. */
+  function showSettings(mode, message) {
+    if (mode !== 'manage') stopAutoRefresh();
+    setupMode = mode || 'fresh';
+    hideAllViews();
+    els.settingsView.hidden = false;
+    var manage = setupMode === 'manage';
+    var migrate = setupMode === 'migrate';
+    els.topbarActions.hidden = !manage;
+    els.settingsBackBtn.hidden = !manage;
+    els.adminActivityCard.hidden = !manage;
+    els.setupIntroFresh.hidden = manage || migrate;
+    els.setupIntroMigrate.hidden = !migrate;
+    els.setupIntroManage.hidden = !manage;
     els.fieldEndpointWrap.hidden = migrate;
     els.fieldKeyWrap.hidden = migrate;
-    /* hidden fields must not block the form's validation */
-    els.endpointInput.required = !migrate;
-    els.readKeyInput.required = !migrate;
-    els.setupIntroFresh.hidden = migrate;
-    els.setupIntroMigrate.hidden = !migrate;
-    els.setupHeading.textContent = migrate ? 'Protect this browser with your password' : 'Connect to your TSG Biom API';
-    els.connectBtn.textContent = migrate ? 'Seal the key and continue' : 'Connect';
+    /* hidden or optional fields must not block form validation */
+    els.endpointInput.required = !migrate && !manage;
+    els.readKeyInput.required = !migrate && !manage;
+    els.passwordConfirmInput.required = !manage;
+    els.fieldConfirmWrap.hidden = manage;
+    els.fieldAdminRemoveWrap.hidden = true;
+    els.adminKeyRemoveInput.checked = false;
+    els.passwordLabel.textContent = manage ? 'Dashboard password (to save changes)' : 'Dashboard password';
+    els.connectBtn.textContent = migrate ? 'Seal the key and continue' : (manage ? 'Save connection settings' : 'Connect');
+    if (manage && sessionCreds) {
+      els.endpointInput.value = sessionCreds.endpoint;
+      els.endpointInput.disabled = true; /* the endpoint is fixed for this build (CSP) */
+      els.readKeyInput.value = '';
+      els.readKeyInput.placeholder = 'Leave blank to keep the saved read key';
+      els.adminKeyInput.value = '';
+      els.adminKeyInput.placeholder = sessionCreds.adminKey ? 'Saved — leave blank to keep it' : 'Your BIOM_ADMIN_KEY';
+      els.adminKeyState.textContent = sessionCreds.adminKey
+        ? 'An admin key is saved on this browser (sealed). Block / Unblock is enabled.'
+        : 'No admin key saved yet — Block / Unblock stays disabled until one is added.';
+      els.fieldAdminRemoveWrap.hidden = !sessionCreds.adminKey;
+      loadAdminLog();
+    } else {
+      els.endpointInput.disabled = false;
+      els.readKeyInput.placeholder = 'Your READ_KEY';
+      els.adminKeyInput.placeholder = 'Your BIOM_ADMIN_KEY';
+      els.adminKeyState.textContent = 'Optional. The admin key enables Block / Unblock and is sealed under the same password.';
+    }
     if (message) {
       els.setupError.textContent = message;
       els.setupError.hidden = false;
@@ -608,8 +959,7 @@
 
   function showLock(message) {
     stopAutoRefresh();
-    els.setupView.hidden = true;
-    els.mainView.hidden = true;
+    hideAllViews();
     els.topbarActions.hidden = true;
     els.lockView.hidden = false;
     els.lockPasswordInput.value = '';
@@ -622,8 +972,7 @@
   }
 
   function showMain() {
-    els.setupView.hidden = true;
-    els.lockView.hidden = true;
+    hideAllViews();
     els.mainView.hidden = false;
     els.topbarActions.hidden = false;
     els.endpointChip.textContent = sessionCreds ? sessionCreds.endpoint : '';
@@ -767,7 +1116,7 @@
      unhides the node). Clear every rendered record container;
      the renderers repaint them on the next unlock + refresh. */
   function clearRendered() {
-    ['statsGrid', 'profilesGrid', 'scansBody', 'banksTableBody', 'recentScansBody', 'scansCards', 'bankDrawerBody', 'vaultHealth'].forEach(function (id) {
+    ['statsGrid', 'profilesGrid', 'scansBody', 'banksTableBody', 'recentScansBody', 'scansCards', 'bankDrawerBody', 'vaultHealth', 'adminLogBody'].forEach(function (id) {
       if (els[id]) els[id].innerHTML = '';
     });
   }
@@ -779,9 +1128,37 @@
     state.profiles = [];
     clearRendered();
     els.readKeyInput.value = '';
+    els.adminKeyInput.value = '';
     els.passwordInput.value = '';
     els.passwordConfirmInput.value = '';
-    showSetup(null, 'fresh');
+    /* v78: after disconnecting there is no seal, so the front
+       door is the quiet first-run notice again — never the form. */
+    showFirstRun('fresh');
+  }
+
+  /* v78: the admin activity log in Settings. Read with the admin
+     key only; a 503 from the API means BIOM_ADMIN_KEY is not set
+     on the server and the copy says exactly that. */
+  function loadAdminLog() {
+    if (!sessionCreds || !els.adminLogBody) return;
+    if (!sessionCreds.adminKey) {
+      els.adminLogBody.innerHTML = '<p class="empty-note">Add the admin key in Connection above to read the admin log — it is protected by the admin key, not the read key.</p>';
+      return;
+    }
+    els.adminLogBody.innerHTML = '<p class="fineprint">Loading the admin log…</p>';
+    Core.adminLog(sessionCreds.endpoint, sessionCreds.adminKey)
+      .then(function (entries) {
+        els.adminLogBody.innerHTML = Core.renderAdminLogHtml(entries);
+      })
+      .catch(function (err) {
+        if (err && err.status === 503) {
+          els.adminLogBody.innerHTML = '<p class="empty-note">Admin controls are not configured on the server. Set BIOM_ADMIN_KEY in the API project\'s environment variables on Vercel and redeploy — until then block, unblock and this log stay off (they never fail open).</p>';
+        } else if (err && err.status === 401) {
+          els.adminLogBody.innerHTML = '<p class="empty-note">The admin key was refused by the API. Check the admin key in Connection above against BIOM_ADMIN_KEY on the server.</p>';
+        } else {
+          els.adminLogBody.innerHTML = '<p class="empty-note">Could not load the admin log. Check your connection and try Refresh log.</p>';
+        }
+      });
   }
 
   function lock() {
@@ -789,13 +1166,23 @@
     state.scans = [];
     state.profiles = [];
     clearRendered();
+    /* v78 (Seat 1): locking clears the Settings form too — a
+       password typed there for a save must not sit in the
+       hidden DOM behind the lock screen (the v73 rule). */
+    els.readKeyInput.value = '';
+    els.adminKeyInput.value = '';
+    els.passwordInput.value = '';
+    els.passwordConfirmInput.value = '';
     showLock(null);
   }
 
   function init() {
-    ['setupView', 'lockView', 'mainView', 'topbarActions', 'endpointChip', 'setupForm', 'endpointInput',
-     'readKeyInput', 'passwordInput', 'passwordConfirmInput', 'setupError', 'connectBtn',
-     'setupHeading', 'setupIntroFresh', 'setupIntroMigrate', 'fieldEndpointWrap', 'fieldKeyWrap',
+    ['firstRunView', 'settingsView', 'lockView', 'mainView', 'topbarActions', 'endpointChip', 'setupForm', 'endpointInput',
+     'readKeyInput', 'adminKeyInput', 'adminKeyState', 'fieldAdminWrap', 'fieldAdminRemoveWrap', 'adminKeyRemoveInput',
+     'passwordInput', 'passwordConfirmInput', 'passwordLabel', 'fieldConfirmWrap', 'setupError', 'connectBtn',
+     'setupIntroFresh', 'setupIntroMigrate', 'setupIntroManage', 'fieldEndpointWrap', 'fieldKeyWrap',
+     'firstRunTextFresh', 'firstRunTextMigrate', 'firstRunSettingsBtn',
+     'adminActivityCard', 'adminLogBody', 'adminLogRefreshBtn', 'settingsBackBtn', 'settingsNavLink', 'bottomSettingsLink',
      'lockForm', 'lockPasswordInput', 'lockError', 'unlockBtn', 'lockResetBtn',
      'errorBanner', 'errorText', 'reenterBtn',
      'statusBanner', 'statusText', 'statsGrid', 'profilesGrid', 'profilesEmpty',
@@ -806,6 +1193,36 @@
      'bankDrawerCloseBtn', 'viewAllScansBtn', 'sidebarCollapseBtn', 'filterToggleBtn', 'scanFilterBar',
      'overviewSection', 'banksSection', 'scansSection'
     ].forEach(function (id) { els[id] = $(id); });
+
+    /* v78: Settings navigation. From the first-run notice the
+       button opens Settings in the pending mode; from inside the
+       unlocked dashboard the sidebar/bottom-nav links open it in
+       manage mode. While locked (seal exists, no session) the
+       links do nothing — the seal cannot be edited without the
+       password, by design. Section links return from Settings
+       to the main view first. */
+    if (els.firstRunSettingsBtn) {
+      els.firstRunSettingsBtn.addEventListener('click', function () { showSettings(setupMode); });
+    }
+    function openSettingsFromNav(ev) {
+      ev.preventDefault();
+      if (sessionCreds) showSettings('manage');
+      else if (!els.settingsView.hidden) { /* already there */ }
+      else if (!storedSealed()) showSettings(setupMode);
+    }
+    if (els.settingsNavLink) els.settingsNavLink.addEventListener('click', openSettingsFromNav);
+    if (els.bottomSettingsLink) els.bottomSettingsLink.addEventListener('click', openSettingsFromNav);
+    if (els.settingsBackBtn) {
+      els.settingsBackBtn.addEventListener('click', function () { showMain(); });
+    }
+    if (els.adminLogRefreshBtn) {
+      els.adminLogRefreshBtn.addEventListener('click', loadAdminLog);
+    }
+    document.querySelectorAll('.side-nav-link:not(#settingsNavLink), .bottom-nav-link:not(#bottomSettingsLink)').forEach(function (link) {
+      link.addEventListener('click', function () {
+        if (sessionCreds && !els.settingsView.hidden) showMain();
+      });
+    });
 
     /* v66 shell wiring: sidebar collapse (memory only), bank
        sorting, the detail drawer, and the mobile filter sheet. */
@@ -837,8 +1254,114 @@
     });
     function openBankDrawer(profile) {
       if (!profile || !els.bankDrawer) return;
-      els.bankDrawerBody.innerHTML = Core.renderBankDetailHtml(profile, state.scans);
+      if (drawerUi.biomId !== profile.biomId) {
+        drawerUi = { biomId: profile.biomId, armed: false, busy: false, message: '', tone: '' };
+      }
+      els.bankDrawerBody.innerHTML = Core.renderBankDetailHtml(profile, state.scans) +
+        Core.renderPersonControlHtml(profile, state.scans) +
+        '<div id="blockActionSlot">' + blockActionHtml(profile) + '</div>';
       els.bankDrawer.hidden = false;
+    }
+
+    function blockActionHtml(profile) {
+      return Core.renderBlockActionHtml(profile, {
+        adminKeyPresent: !!(sessionCreds && sessionCreds.adminKey),
+        armed: drawerUi.armed, busy: drawerUi.busy,
+        message: drawerUi.message, tone: drawerUi.tone
+      });
+    }
+
+    function rerenderBlockAction(profile) {
+      var slot = document.getElementById('blockActionSlot');
+      if (slot) slot.innerHTML = blockActionHtml(profile);
+    }
+
+    function adminErrorMessage(err) {
+      if (err && err.status === 503) {
+        return 'Admin controls are not configured on the server. Set BIOM_ADMIN_KEY in the API project\'s environment variables on Vercel and redeploy — blocking stays off until then (it never fails open).';
+      }
+      if (err && err.status === 401) {
+        return 'The admin key was refused by the API. Check the admin key in Settings → Connection against BIOM_ADMIN_KEY on the server.';
+      }
+      if (err && err.body && err.body.error) return 'The API refused: ' + err.body.error + '.';
+      return 'Could not reach the API. Check your connection and try again.';
+    }
+
+    function runAdminAction(profile, action) {
+      if (!sessionCreds || !sessionCreds.adminKey || drawerUi.busy) return;
+      var reason = '';
+      if (action === 'block') {
+        var input = els.bankDrawerBody.querySelector('.block-reason-input');
+        reason = input ? input.value.trim() : '';
+      }
+      drawerUi.busy = true;
+      drawerUi.message = '';
+      rerenderBlockAction(profile);
+      var call = action === 'block'
+        ? Core.adminBlock(sessionCreds.endpoint, sessionCreds.adminKey, profile.biomId, reason)
+        : Core.adminUnblock(sessionCreds.endpoint, sessionCreds.adminKey, profile.biomId);
+      call.then(function (res) {
+        drawerUi.busy = false;
+        drawerUi.armed = false;
+        drawerUi.tone = 'ok';
+        if (action === 'block') {
+          profile.blocked = true;
+          profile.blockedTs = Date.now();
+          profile.blockedReason = reason || null;
+          var revoked = (res && res.revokedDeviceIds) || [];
+          drawerUi.message = res && res.already
+            ? 'This person was already blocked.'
+            : 'Blocked. ' + (revoked.length
+              ? 'Devices revoked: ' + revoked.join(', ') + '.'
+              : 'No registered device needed revoking.') +
+              ' Their sync writes and payments are now refused.';
+        } else {
+          profile.blocked = false;
+          profile.blockedTs = null;
+          profile.blockedReason = null;
+          drawerUi.message = 'Unblocked. Sync and payments work again — the person\'s devices stay revoked, so they re-register a device to come back.';
+        }
+        /* v78 (Seat 2 S4): the action applied but its audit-log
+           write failed — say so in the same breath, never let a
+           clean success hide an unlogged control action. */
+        if (res && res.auditWarning) {
+          drawerUi.tone = 'err';
+          drawerUi.message += ' Warning: ' + res.auditWarning + ' — this action is not in the admin log.';
+        }
+        renderAll();
+        openBankDrawer(profile);
+        refresh();
+      }).catch(function (err) {
+        drawerUi.busy = false;
+        drawerUi.tone = 'err';
+        drawerUi.message = adminErrorMessage(err);
+        rerenderBlockAction(profile);
+      });
+    }
+
+    if (els.bankDrawerBody) {
+      els.bankDrawerBody.addEventListener('click', function (ev) {
+        var btn = ev.target.closest ? ev.target.closest('[data-action]') : null;
+        if (!btn) return;
+        var action = btn.getAttribute('data-action');
+        var profile = null;
+        state.profiles.forEach(function (p) { if (String(p.biomId || '') === drawerUi.biomId) profile = p; });
+        if (!profile) return;
+        if (action === 'open-settings') {
+          els.bankDrawer.hidden = true;
+          showSettings('manage');
+        } else if (action === 'block-arm' || action === 'unblock-arm') {
+          drawerUi.armed = true; drawerUi.message = '';
+          rerenderBlockAction(profile);
+        } else if (action === 'block-cancel') {
+          drawerUi.armed = false; drawerUi.message = '';
+          rerenderBlockAction(profile);
+        } else if (action === 'block-confirm') {
+          runAdminAction(profile, 'block');
+        } else if (action === 'unblock-confirm') {
+          runAdminAction(profile, 'unblock');
+        }
+      });
     }
     if (els.bankDrawerCloseBtn) {
       els.bankDrawerCloseBtn.addEventListener('click', function () { els.bankDrawer.hidden = true; });
@@ -864,8 +1387,11 @@
       ev.preventDefault();
       var password = els.passwordInput.value;
       var confirm = els.passwordConfirmInput.value;
+      var manage = setupMode === 'manage';
       if (!password) {
-        els.setupError.textContent = 'Set the dashboard password — it seals the read key on this browser.';
+        els.setupError.textContent = manage
+          ? 'Enter your dashboard password — saving re-seals the credentials under it.'
+          : 'Set the dashboard password — it seals the read key on this browser.';
         els.setupError.hidden = false;
         return;
       }
@@ -873,13 +1399,16 @@
          only — the seal previously accepted any non-empty string,
          including a one-character password over the read key. The
          unlock path is deliberately NOT length-checked: an existing
-         seal must always open with the password it was made with. */
-      if (password.length < 8) {
+         seal must always open with the password it was made with.
+         v78: manage mode re-enters the EXISTING password (proven
+         by opening the seal), so the floor does not apply there
+         either — the password is not being chosen, only proven. */
+      if (!manage && password.length < 8) {
         els.setupError.textContent = 'Use at least 8 characters for the dashboard password — it is the only thing protecting the sealed read key on this browser.';
         els.setupError.hidden = false;
         return;
       }
-      if (password !== confirm) {
+      if (!manage && password !== confirm) {
         els.setupError.textContent = 'The two passwords do not match. Type the same password in both boxes.';
         els.setupError.hidden = false;
         return;
@@ -899,14 +1428,73 @@
           sessionCreds = creds;
           els.passwordInput.value = '';
           els.passwordConfirmInput.value = '';
+          els.adminKeyInput.value = '';
           showMain();
         });
       };
 
+      if (manage) {
+        /* v78 manage: prove the password by opening the current
+           seal with it, then re-seal the edited credentials under
+           the same password. Blank key fields keep the saved
+           values; the remove checkbox clears the admin key. A
+           REPLACED read key is verified against the API before
+           anything is sealed, so a typo cannot lock the
+           dashboard out of its own data. */
+        var sealedNow = storedSealed();
+        if (!sealedNow || !sessionCreds) { showFirstRun('fresh'); els.connectBtn.disabled = false; return; }
+        Core.unsealCredentials(password, sealedNow)
+          .then(function (current) {
+            var newReadKey = els.readKeyInput.value.trim();
+            var creds = {
+              endpoint: current.endpoint,
+              readKey: newReadKey || current.readKey,
+              adminKey: els.adminKeyRemoveInput.checked ? '' : (els.adminKeyInput.value.trim() || current.adminKey || '')
+            };
+            var verify = newReadKey
+              ? Core.loadAll(creds.endpoint, creds.readKey)
+              : Promise.resolve(null);
+            /* v78 (Seat 1 note): a REPLACED admin key is verified
+               against the admin log before it is sealed — a typo
+               must surface here, not weeks later at a block. */
+            var newAdminKey = els.adminKeyInput.value.trim();
+            if (newAdminKey) {
+              verify = verify.then(function () {
+                return Core.adminLog(creds.endpoint, newAdminKey).catch(function (e) {
+                  var ae = new Error('admin key verification failed');
+                  ae.adminErr = e;
+                  throw ae;
+                });
+              });
+            }
+            return verify.then(function () { return finishSetup(creds); });
+          })
+          .then(function () { refresh(); })
+          .catch(function (err) {
+            if (err && err.adminErr) {
+              els.setupError.textContent = err.adminErr.status === 503
+                ? 'Admin controls are not configured on the server (BIOM_ADMIN_KEY is not set), so the new admin key could not be verified. Nothing was changed.'
+                : 'The new admin key was refused by the API. Nothing was changed — check the key against BIOM_ADMIN_KEY on the server.';
+            } else if (err && err.status === 401) {
+              els.setupError.textContent = 'The new read key was refused by the API (unauthorised). Nothing was changed.';
+            } else if (err && err.status) {
+              els.setupError.textContent = 'The API answered with an error (HTTP ' + err.status + ') while checking the new read key. Nothing was changed.';
+            } else if (err && err.message && err.message.indexOf('Seal') !== -1) {
+              els.setupError.textContent = 'Could not seal the credentials in this browser. Nothing was changed.';
+            } else {
+              /* unseal failure = the password did not open the seal */
+              els.setupError.textContent = 'That password did not unlock the sealed credentials. Nothing was changed.';
+            }
+            els.setupError.hidden = false;
+          })
+          .then(function () { els.connectBtn.disabled = false; });
+        return;
+      }
+
       if (setupMode === 'migrate') {
         var legacy = legacyCreds();
-        if (!legacy) { showSetup(null, 'fresh'); els.connectBtn.disabled = false; return; }
-        finishSetup(legacy)
+        if (!legacy) { showSettings('fresh'); els.connectBtn.disabled = false; return; }
+        finishSetup({ endpoint: legacy.endpoint, readKey: legacy.readKey, adminKey: els.adminKeyInput.value.trim() })
           .then(function () { refresh(); })
           .catch(function () {
             els.setupError.textContent = 'Could not seal the key in this browser. Try again.';
@@ -919,15 +1507,31 @@
       var endpoint = els.endpointInput.value.trim() || DEFAULT_ENDPOINT;
       var readKey = els.readKeyInput.value.trim();
       if (!readKey) { els.connectBtn.disabled = false; return; }
+      var freshAdminKey = els.adminKeyInput.value.trim();
       Core.loadAll(endpoint, readKey)
         .then(function (data) {
           state.scans = data.scans;
           state.profiles = data.profiles;
-          return finishSetup({ endpoint: endpoint, readKey: readKey });
+          /* v78 (Seat 1 note): an admin key entered at setup is
+             verified against the admin log before it is sealed. */
+          var verifyAdmin = freshAdminKey
+            ? Core.adminLog(endpoint, freshAdminKey).catch(function (e) {
+              var ae = new Error('admin key verification failed');
+              ae.adminErr = e;
+              throw ae;
+            })
+            : Promise.resolve(null);
+          return verifyAdmin.then(function () {
+            return finishSetup({ endpoint: endpoint, readKey: readKey, adminKey: freshAdminKey });
+          });
         })
         .then(function () { renderAll(); })
         .catch(function (err) {
-          if (err && err.status === 401) {
+          if (err && err.adminErr) {
+            els.setupError.textContent = err.adminErr.status === 503
+              ? 'Admin controls are not configured on the server (BIOM_ADMIN_KEY is not set), so the admin key could not be verified. Nothing was saved — leave the admin key blank to connect without blocking, or set BIOM_ADMIN_KEY first.'
+              : 'The admin key was refused by the API. Nothing was saved — check it against BIOM_ADMIN_KEY on the server, or leave it blank to connect without blocking.';
+          } else if (err && err.status === 401) {
             els.setupError.textContent = 'The read key was refused by the API (unauthorised). ' +
               'Check that you entered the READ_KEY set on the server, then try again.';
           } else if (err && err.status) {
@@ -945,7 +1549,7 @@
     els.lockForm.addEventListener('submit', function (ev) {
       ev.preventDefault();
       var sealed = storedSealed();
-      if (!sealed) { showSetup(null, 'fresh'); return; }
+      if (!sealed) { showFirstRun('fresh'); return; }
       els.unlockBtn.disabled = true;
       els.lockError.hidden = true;
       Core.unsealCredentials(els.lockPasswordInput.value, sealed)
@@ -978,7 +1582,7 @@
       els.lockResetBtn.textContent = 'Forget the sealed key on this browser';
       sessionCreds = null;
       clearStored();
-      showSetup(null, 'fresh');
+      showFirstRun('fresh');
     });
 
     els.refreshBtn.addEventListener('click', refresh);
@@ -994,16 +1598,18 @@
     });
     els.searchInput.addEventListener('input', renderAll);
 
-    /* v63 entry rule: a sealed browser goes to the LOCK screen
-       and fetches nothing until the password unlocks it; a
-       pre-v63 plaintext browser goes to the one-time migration;
-       a new browser goes to first-run setup. */
+    /* v63 entry rule, v78 shape: a sealed browser goes to the
+       LOCK screen (password only) and fetches nothing until the
+       password unlocks it; a browser with no seal gets the quiet
+       first-run notice — fresh, or the migration variant when a
+       pre-v63 plaintext key is still held. The setup form itself
+       lives only in Settings and never fronts the dashboard. */
     if (storedSealed()) {
       showLock(null);
     } else if (legacyCreds()) {
-      showSetup(null, 'migrate');
+      showFirstRun('migrate');
     } else {
-      showSetup(null, 'fresh');
+      showFirstRun('fresh');
     }
   }
 
