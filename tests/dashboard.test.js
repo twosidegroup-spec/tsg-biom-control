@@ -202,9 +202,15 @@ async function main() {
   check('V66 the banks table renders summary counts and status (incl. Removed) with no template data',
     banksRows.indexOf('TSG-BIO-2841') !== -1 && banksRows.indexOf('>3</td>') !== -1 &&
     banksRows.indexOf('Removed') !== -1 && banksRows.indexOf('data-biom-id="TSG-BIO-7777"') !== -1);
-  check('V66 the drawer detail is the same summary record the card renders (summary-only rule intact)',
-    Core.renderBankDetailHtml(data.profiles[0]) === Core.renderProfilesHtml([data.profiles[0]]) &&
-    Core.renderBankDetailHtml(data.profiles[0]).indexOf('Sealed (enc v1)') !== -1);
+  /* v74 supersedes the v66 equality below: the Chairman's
+     extension orders the person detail to ADD the registration
+     record + scan history to the same summary card. The
+     summary-only rule still holds — the detail renders from the
+     summary record plus already-loaded scan summaries only. */
+  check('V66/V74 the drawer detail opens with the same summary card the grid renders (summary-only rule intact), then the v74 sections',
+    Core.renderBankDetailHtml(data.profiles[0]).indexOf(Core.renderProfilesHtml([data.profiles[0]])) === 0 &&
+    Core.renderBankDetailHtml(data.profiles[0]).indexOf('Sealed (enc v1)') !== -1 &&
+    Core.renderBankDetailHtml(data.profiles[0]).indexOf('Registration record') !== -1);
   check('V66 bank sorting orders by the chosen summary column',
     Core.sortProfiles(data.profiles, 'version', 1)[0].biomId === 'TSG-BIO-7777' &&
     Core.sortProfiles(data.profiles, 'version', -1)[0].biomId === 'TSG-BIO-2841');
@@ -250,9 +256,51 @@ async function main() {
     dashCss.indexOf('grid-template-columns: minmax(0, 7fr) minmax(0, 5fr)') !== -1 &&
     dashCss.indexOf('.panel { min-width: 0; }') !== -1 &&
     dashCss.indexOf('overflow-x: auto') !== -1);
-  check('V66 seal mechanics remain pinned by the v63 checks above and the scan table keeps its eight columns (no invented writer column)',
+  check('V66 seal mechanics remain pinned by the v63 checks above and the scan table keeps its columns (no invented writer column)',
     pageHtml.indexOf('<th scope="col">Device</th>') !== -1 && pageHtml.indexOf('Writer') === -1 &&
     typeof Core.sealCredentials === 'function' && Core.PBKDF2_ITERATIONS === 600000);
+
+  /* ---- v74: scan durations, the over-2s flag, person detail ---- */
+  check('V74 fmtDuration renders tenths from the real milliseconds',
+    Core.fmtDuration(1834.6) === '1.8s' && Core.fmtDuration(2000) === '2.0s' && Core.fmtDuration(0) === '0.0s');
+  check('V74 fmtDuration shows Unmeasured for a missing or invalid duration — never an estimate',
+    Core.fmtDuration(undefined) === 'Unmeasured' && Core.fmtDuration(null) === 'Unmeasured' &&
+    Core.fmtDuration(-1) === 'Unmeasured' && Core.fmtDuration('fast') === 'Unmeasured');
+  check('V74 the slow flag is decided on raw milliseconds (2,049 ms flags even though it displays 2.0s; exactly 2,000 ms does not)',
+    Core.isSlowScan({ durationMs: 2049 }) === true && Core.fmtDuration(2049) === '2.0s' &&
+    Core.isSlowScan({ durationMs: 2000 }) === false && Core.isSlowScan({}) === false);
+  const durScans = [
+    { id: 'd1', ts: 1764000100000, deviceLabel: 'Rig', kind: 'money-auth', profileName: 'Sajid', biomId: 'TSG-BIO-2841', hand: 'left', edccScore: 0.5, palmnetScore: 0.9, result: 'Verified', durationMs: 1712 },
+    { id: 'd2', ts: 1764000200000, deviceLabel: 'Rig', kind: 'verify', profileName: 'Sajid', biomId: 'TSG-BIO-2841', hand: 'left', edccScore: 0.5, palmnetScore: 0.9, result: 'Verified', durationMs: 2600 },
+    { id: 'd3', ts: 1764000300000, deviceLabel: 'Rig', kind: 'enrol', profileName: 'Sajid', biomId: 'TSG-BIO-2841', hand: 'left', edccScore: null, palmnetScore: null, result: 'Enrolled' },
+    { id: 'd4', ts: 1764000400000, deviceLabel: 'Rig', kind: 'verify', profileName: 'Other', biomId: 'TSG-BIO-9999', hand: 'right', edccScore: 0.4, palmnetScore: 0.8, result: 'Verified', durationMs: 900 }
+  ];
+  const durRows = Core.renderScansRowsHtml(durScans);
+  check('V74 the Scan Log rows carry a Duration cell with the measured value',
+    durRows.indexOf('data-label="Duration"') !== -1 && durRows.indexOf('1.7s') !== -1 && durRows.indexOf('2.6s') !== -1);
+  check('V74 a scan over 2.0s is visibly flagged in the Scan Log',
+    durRows.indexOf('duration-slow') !== -1 && durRows.indexOf('Over 2s') !== -1);
+  check('V74 an unmeasured scan shows Unmeasured in the Scan Log, unflagged',
+    durRows.indexOf('Unmeasured') !== -1 && (durRows.match(/Over 2s/g) || []).length === 1);
+  check('V74 the Scan Log table header carries the Duration column',
+    pageHtml.indexOf('<th scope="col">Duration</th>') !== -1);
+  const durCards = Core.renderScanCardsHtml(durScans);
+  check('V74 the mobile scan cards carry the duration and the flag',
+    durCards.indexOf('Duration') !== -1 && durCards.indexOf('2.6s') !== -1 && durCards.indexOf('Over 2s') !== -1);
+  const detailProfile = { biomId: 'TSG-BIO-2841', name: 'Sajid', phone: '01933038706', hand: 'left', neuralModel: 'palmnet-r3-ep12', edccCount: 3, neuralCount: 3, enc: 'v1', version: 4, deleted: false, deletedTs: null, updatedTs: 1764000000000, ownerDeviceId: 'dev-abc123' };
+  const detail = Core.renderBankDetailHtml(detailProfile, durScans);
+  check('V74 the person detail shows the registration record: name, phone, palm registered',
+    detail.indexOf('Registration record') !== -1 && detail.indexOf('01933038706') !== -1 &&
+    detail.indexOf('Left palm registered') !== -1 && detail.indexOf('3 EDCC') !== -1);
+  check('V74 the person detail scan history lists only that person\'s scans, with durations and the flag',
+    detail.indexOf('Scan history') !== -1 && detail.indexOf('1.7s') !== -1 && detail.indexOf('2.6s') !== -1 &&
+    detail.indexOf('Unmeasured') !== -1 && detail.indexOf('Over 2s') !== -1 && detail.indexOf('0.9s') === -1);
+  const detailNoPhone = Core.renderBankDetailHtml({ biomId: 'TSG-BIO-2841', name: 'Sajid', hand: 'left', edccCount: 1, neuralCount: 0, deleted: false }, []);
+  check('V74 a legacy profile without a phone renders the detail with an em dash and an empty history note',
+    detailNoPhone.indexOf('Registration record') !== -1 && detailNoPhone.indexOf('No scans recorded for this person yet.') !== -1);
+  const dashAppSrc = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+  check('V74 the drawer wiring passes the loaded scans into the person detail',
+    dashAppSrc.indexOf('Core.renderBankDetailHtml(profile, state.scans)') !== -1);
 
   console.log('\n' + (fail === 0 ? 'ALL DASHBOARD TESTS PASSED (' + pass + ')' : fail + ' FAILURES, ' + pass + ' passed'));
   process.exit(fail === 0 ? 0 : 1);

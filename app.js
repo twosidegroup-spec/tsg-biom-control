@@ -217,6 +217,7 @@
         '<td data-label="EDCC" class="num">' + esc(fmtScore(s.edccScore)) + '</td>' +
         '<td data-label="PalmNet" class="num">' + esc(fmtScore(s.palmnetScore)) + '</td>' +
         '<td data-label="Result">' + resultBadgeHtml(s.result) + '</td>' +
+        '<td data-label="Duration">' + durationHtml(s) + '</td>' +
         '<td data-label="Device">' + esc(s.deviceLabel || '—') + '</td>' +
         '</tr>';
     }).join('');
@@ -278,9 +279,64 @@
 
   /* The drawer shows the full SUMMARY record for one bank — the
      same fields the profile card renders. Summary data only. */
-  function renderBankDetailHtml(p) {
+  /* v74: scan durations (Chairman's bar: a scan must complete
+     in under two seconds). fmtDuration renders the real measured
+     duration the device stamped on the record; a record without
+     one (older app versions, or a scan whose timing could not be
+     measured) shows Unmeasured — never an estimate. The flag is
+     decided on the raw milliseconds, not the rounded display,
+     so a 2,049 ms scan shows "2.0s" AND its Over 2s flag. */
+  function fmtDuration(ms) {
+    if (typeof ms !== 'number' || !isFinite(ms) || ms < 0) return 'Unmeasured';
+    return (ms / 1000).toFixed(1) + 's';
+  }
+  function isSlowScan(s) {
+    return !!s && typeof s.durationMs === 'number' && isFinite(s.durationMs) && s.durationMs > 2000;
+  }
+  function durationHtml(s) {
+    var slow = isSlowScan(s);
+    return '<span class="duration' + (slow ? ' duration-slow' : '') + '">' + esc(fmtDuration(s ? s.durationMs : null)) + '</span>' +
+      (slow ? ' <span class="badge badge-denied">Over 2s</span>' : '');
+  }
+
+  function renderBankDetailHtml(p, scans) {
     if (!p) return '';
-    return renderProfilesHtml([p]);
+    var html = renderProfilesHtml([p]);
+    /* v74: the registration record — name, phone, palm
+       registered — followed by this person's scan history with
+       durations (registration, strengthening and payment/send
+       scans included: every synced scan carrying their Biom ID). */
+    var counts = profileCounts(p);
+    var palmLine;
+    if (p.deleted === true) palmLine = 'Palm bank removed';
+    else if (counts.edcc + counts.emb > 0) palmLine = handLabel(p.hand) + ' palm registered — ' + counts.edcc + ' EDCC template' + (counts.edcc === 1 ? '' : 's') + ', ' + counts.emb + ' PalmNet embedding' + (counts.emb === 1 ? '' : 's');
+    else palmLine = 'No palm registered';
+    html += '<article class="profile-card detail-card">' +
+      '<h3>Registration record</h3>' +
+      '<dl class="profile-meta">' +
+      '<div><dt>Name</dt><dd>' + esc(p.name || '—') + '</dd></div>' +
+      '<div><dt>Phone</dt><dd>' + esc(p.phone || '—') + '</dd></div>' +
+      '<div><dt>Palm</dt><dd>' + esc(palmLine) + '</dd></div>' +
+      '</dl></article>';
+    var mine = sortNewestFirst((scans || []).filter(function (s) { return !!s && !!s.biomId && s.biomId === p.biomId; }));
+    html += '<article class="profile-card detail-card">' +
+      '<h3>Scan history</h3>' +
+      (mine.length
+        ? '<table class="scans-table mini-table"><thead><tr>' +
+          '<th scope="col">Time (Dhaka)</th><th scope="col">Kind</th><th scope="col">Result</th><th scope="col">Duration</th>' +
+          '</tr></thead><tbody>' +
+          mine.slice(0, 50).map(function (s) {
+            return '<tr>' +
+              '<td class="time">' + esc(fmtDhaka(s.ts)) + '</td>' +
+              '<td>' + esc(kindLabel(s.kind)) + '</td>' +
+              '<td>' + resultBadgeHtml(s.result) + '</td>' +
+              '<td>' + durationHtml(s) + '</td>' +
+              '</tr>';
+          }).join('') +
+          '</tbody></table>'
+        : '<p class="empty-note">No scans recorded for this person yet.</p>') +
+      '</article>';
+    return html;
   }
 
   function renderRecentScansRowsHtml(scans) {
@@ -327,6 +383,7 @@
         '<div class="scan-card-row"><span class="k">Hand</span><span>' + esc(handLabel(s.hand)) + '</span></div>' +
         '<div class="scan-card-row"><span class="k">EDCC</span><span class="num">' + esc(fmtScore(s.edccScore)) + '</span></div>' +
         '<div class="scan-card-row"><span class="k">PalmNet</span><span class="num">' + esc(fmtScore(s.palmnetScore)) + '</span></div>' +
+        '<div class="scan-card-row"><span class="k">Duration</span><span>' + durationHtml(s) + '</span></div>' +
         '<div class="scan-card-row"><span class="k">Time</span><span class="time">' + esc(full) + '</span></div>' +
         '<div class="scan-card-row"><span class="k">Device</span><span>' + esc(s.deviceLabel || '—') + '</span></div>' +
         '</article>';
@@ -462,6 +519,9 @@
     sortProfiles: sortProfiles,
     renderBanksRowsHtml: renderBanksRowsHtml,
     renderBankDetailHtml: renderBankDetailHtml,
+    fmtDuration: fmtDuration,
+    isSlowScan: isSlowScan,
+    durationHtml: durationHtml,
     renderRecentScansRowsHtml: renderRecentScansRowsHtml,
     renderVaultHealthHtml: renderVaultHealthHtml,
     renderScanCardsHtml: renderScanCardsHtml,
@@ -777,7 +837,7 @@
     });
     function openBankDrawer(profile) {
       if (!profile || !els.bankDrawer) return;
-      els.bankDrawerBody.innerHTML = Core.renderBankDetailHtml(profile);
+      els.bankDrawerBody.innerHTML = Core.renderBankDetailHtml(profile, state.scans);
       els.bankDrawer.hidden = false;
     }
     if (els.bankDrawerCloseBtn) {

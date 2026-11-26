@@ -354,6 +354,12 @@ section:first-of-type .section-title { margin-top: 6px; }
 .badge-denied { background: var(--red-bg); color: var(--red-tx); }
 .badge-other { background: var(--grey-bg); color: var(--grey-tx); }
 
+/* v74: scan durations + the over-2s flag, and the person-detail
+   cards in the bank drawer. */
+.duration { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.duration-slow { color: var(--red-tx); font-weight: 700; }
+.detail-card { margin-top: 14px; }
+
 /* ---------- Scan cards (mobile, day-grouped) ---------- */
 
 .scan-cards { display: none; }
