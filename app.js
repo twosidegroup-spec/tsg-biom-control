@@ -701,11 +701,23 @@
     if (els.autoRefreshToggle) els.autoRefreshToggle.checked = false;
   }
 
+  /* v73 (Seat 1 dashboard F4): locking or disconnecting must
+     not leave the last rendered records sitting in the hidden
+     DOM (names, Biom IDs, device labels readable by anyone who
+     unhides the node). Clear every rendered record container;
+     the renderers repaint them on the next unlock + refresh. */
+  function clearRendered() {
+    ['statsGrid', 'profilesGrid', 'scansBody', 'banksTableBody', 'recentScansBody', 'scansCards', 'bankDrawerBody', 'vaultHealth'].forEach(function (id) {
+      if (els[id]) els[id].innerHTML = '';
+    });
+  }
+
   function disconnect() {
     sessionCreds = null;
     clearStored();
     state.scans = [];
     state.profiles = [];
+    clearRendered();
     els.readKeyInput.value = '';
     els.passwordInput.value = '';
     els.passwordConfirmInput.value = '';
@@ -716,6 +728,7 @@
     sessionCreds = null;
     state.scans = [];
     state.profiles = [];
+    clearRendered();
     showLock(null);
   }
 
