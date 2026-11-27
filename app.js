@@ -135,7 +135,7 @@
 
   /* ---------------- stats ---------------- */
 
-  function computeStats(scans, profiles) {
+  function computeStats(scans, profiles, research) {
     var verified = 0, denied = 0, last = null;
     scans.forEach(function (s) {
       var c = classifyResult(s.result);
@@ -151,7 +151,10 @@
          (they render as Removed cards) but they are not enrolled
          profiles — the stat counts live banks only. */
       profiles: profiles.filter(function (p) { return !(p && p.deleted === true); }).length,
-      lastScanTs: last
+      lastScanTs: last,
+      /* v81: the research-frame count (simulation mode), when
+         the API reported it; null keeps the card hidden. */
+      research: research || null
     };
   }
 
@@ -191,7 +194,11 @@
       card('Verified', stats.verified, 'accepted scans', false, 'ok') +
       card('Denied', stats.denied, 'refused scans', false, 'bad') +
       card('Enrolled profiles', stats.profiles, 'palm banks synced') +
-      card('Last scan', stats.lastScanTs === null ? '—' : fmtDhaka(stats.lastScanTs), 'Asia/Dhaka', true);
+      card('Last scan', stats.lastScanTs === null ? '—' : fmtDhaka(stats.lastScanTs), 'Asia/Dhaka', true) +
+      /* v81: simulation/research mode — frames received for the
+         detector research store, counted by the API's read-key
+         research route. Shown only when the API reported it. */
+      (stats.research ? card('Research frames', stats.research.frames, stats.research.bundles + ' bundles received · simulation mode') : '');
   }
 
   function renderProfilesHtml(profiles) {
@@ -400,6 +407,19 @@
       '</dl>';
   }
 
+  /* v80 (Gap 1): the cross-match line of a scan card — the top
+     OTHER identity a denied scan's palm scored close to, per
+     scoring system. Present only on records the app sent with
+     cross-match evidence (an in-band near-match); ordinary
+     records render exactly as before. */
+  function crossMatchLine(s) {
+    var parts = [];
+    if (s.crossEdccId) parts.push(esc(s.crossEdccId) + ' · EDCC ' + esc(fmtScore(s.crossEdccScore)));
+    if (s.crossNeuralId && s.crossNeuralId !== s.crossEdccId) parts.push(esc(s.crossNeuralId) + ' · PalmNet ' + esc(fmtScore(s.crossNeuralScore)));
+    else if (s.crossNeuralId) parts.push('PalmNet ' + esc(fmtScore(s.crossNeuralScore)));
+    return parts.join(' · ');
+  }
+
   function renderScanCardsHtml(scans) {
     var sorted = sortNewestFirst(scans);
     var out = '', day = null;
@@ -415,6 +435,9 @@
         '<div class="scan-card-row"><span class="k">Hand</span><span>' + esc(handLabel(s.hand)) + '</span></div>' +
         '<div class="scan-card-row"><span class="k">EDCC</span><span class="num">' + esc(fmtScore(s.edccScore)) + '</span></div>' +
         '<div class="scan-card-row"><span class="k">PalmNet</span><span class="num">' + esc(fmtScore(s.palmnetScore)) + '</span></div>' +
+        ((s.crossEdccId || s.crossNeuralId)
+          ? '<div class="scan-card-row"><span class="k">Closest other palm</span><span>' + crossMatchLine(s) + '</span></div>'
+          : '') +
         '<div class="scan-card-row"><span class="k">Duration</span><span>' + durationHtml(s) + '</span></div>' +
         '<div class="scan-card-row"><span class="k">Time</span><span class="time">' + esc(full) + '</span></div>' +
         '<div class="scan-card-row"><span class="k">Device</span><span>' + esc(s.deviceLabel || '—') + '</span></div>' +
@@ -574,7 +597,7 @@
      ui = { adminKeyPresent, armed, busy, message, tone }.
      Buttons carry data-action attributes; the wiring owns the
      clicks and re-renders this block on every state change. */
-  function renderBlockActionHtml(p, ui) {
+  function renderBlockActionHtml(p, ui, scans) {
     if (!p || p.deleted === true) return '';
     ui = ui || {};
     var msg = ui.message
@@ -593,6 +616,57 @@
         (typeof p.tamperFlags.lastRollbackTs === 'number' ? ' (most recently ' + esc(fmtDhaka(p.tamperFlags.lastRollbackTs)) + ')' : '') +
         '. A stale second device can cause this — if it was not theirs, consider blocking.</p>'
       : '';
+    /* v80 (Gaps 1 + 2): two evidence flags computed from the
+       scan records, in the same flag-not-verdict language as
+       the tamper flag above.
+       IMPERSONATION: denied scans whose presented palm scored
+       close to THIS person's palm (the record's cross-match
+       fields name them). This person is the TARGET — the flag
+       exists so the Chairman sees they are being targeted;
+       the server never blocks a target for it (attributed
+       events block the attacker's account instead).
+       DUPLICATE ENROLMENT: enrolment refusals naming this
+       person — a device already holding their palm refused to
+       enrol it again under a new identity, and stored nothing.
+       Field-test records are exercises, never evidence, and
+       are excluded from both flags. */
+    var crossCount = 0, crossLatest = 0, crossTopEdcc = null, crossTopNeural = null, dupCount = 0, dupLatest = 0;
+    (scans || []).forEach(function (s) {
+      if (!s || s.fieldTest === true) return;
+      /* v80 Seat 1 fixes: the flag counts DENIED records only
+         (correct by this code, not only by the app's
+         construction), and the strongest score is tracked PER
+         SYSTEM — EDCC and PalmNet scores live on different
+         scales (bars 0.32 vs 0.5895), so one raw maximum
+         across both would systematically mislead. */
+      if (/denied/i.test(s.result || '') && (s.crossEdccId === p.biomId || s.crossNeuralId === p.biomId)) {
+        crossCount++;
+        if ((s.ts || 0) > crossLatest) crossLatest = s.ts || 0;
+        if (s.crossEdccId === p.biomId && typeof s.crossEdccScore === 'number' && (crossTopEdcc === null || s.crossEdccScore > crossTopEdcc)) crossTopEdcc = s.crossEdccScore;
+        if (s.crossNeuralId === p.biomId && typeof s.crossNeuralScore === 'number' && (crossTopNeural === null || s.crossNeuralScore > crossTopNeural)) crossTopNeural = s.crossNeuralScore;
+      }
+      if (s.kind === 'enrol' && s.biomId === p.biomId && /duplicate/i.test(s.result || '')) {
+        dupCount++;
+        if ((s.ts || 0) > dupLatest) dupLatest = s.ts || 0;
+      }
+    });
+    var flagsHtml = '';
+    if (crossCount > 0) {
+      var crossTopParts = [];
+      if (crossTopEdcc !== null) crossTopParts.push('EDCC ' + crossTopEdcc.toFixed(3));
+      if (crossTopNeural !== null) crossTopParts.push('PalmNet ' + crossTopNeural.toFixed(3));
+      flagsHtml += '<p class="form-error" role="alert">Impersonation attempts targeting this person: ' + crossCount + ' recorded' +
+        (crossLatest ? ' (most recently ' + esc(fmtDhaka(crossLatest)) + ')' : '') +
+        (crossTopParts.length ? '; strongest: ' + crossTopParts.join(' · ') : '') +
+        '. These are denied scans where a presented palm scored close to this person\'s palm. Attempts from an enrolled attacker\'s own device count toward an auto-block of the attacker — this person is never blocked for being targeted.</p>';
+    }
+    if (dupCount > 0) {
+      flagsHtml += '<p class="form-error" role="alert">Duplicate enrolment refused: ' + dupCount + ' attempt' + (dupCount === 1 ? '' : 's') +
+        ' to enrol this palm again under a new identity on a device already holding it' +
+        (dupLatest ? ' (most recently ' + esc(fmtDhaka(dupLatest)) + ')' : '') +
+        '. Each enrolment was refused and nothing was created.</p>';
+    }
+    tamperHtml += flagsHtml;
     if (!ui.adminKeyPresent) {
       return open + tamperHtml +
         '<p class="fineprint">Blocking is not set up on this browser yet. Add the <strong>admin key</strong> in Settings → Connection to enable Block / Unblock here.</p>' +
@@ -712,6 +786,23 @@
       if (!res.ok) throw apiError(res.status, 'HTTP ' + res.status);
       return res.json();
     });
+  }
+
+  /* v81: the research-frame count for the stats strip. The
+     count route is ADMIN-key gated on the API (it sits with
+     the other admin routes), so this goes through adminFetch
+     with the sealed admin key; without one it resolves null.
+     Any failure (older API, route absent, network) resolves
+     null — the card simply stays hidden; research counting
+     must never break the dashboard's main load. */
+  function loadResearchCount(endpoint, adminKey, fetchFn) {
+    if (!adminKey) return Promise.resolve(null);
+    return adminFetch(endpoint, adminKey, '/api/admin/research', null, fetchFn)
+      .then(function (j) {
+        if (!j || typeof j.frames !== 'number') return null;
+        return { bundles: typeof j.bundles === 'number' ? j.bundles : 0, frames: j.frames, byDay: j.byDay || {} };
+      })
+      .catch(function () { return null; });
   }
 
   function loadAll(endpoint, readKey, fetchFn) {
@@ -891,7 +982,8 @@
     adminLog: adminLog,
     adminBlockedIps: adminBlockedIps,
     fetchJson: fetchJson,
-    loadAll: loadAll
+    loadAll: loadAll,
+    loadResearchCount: loadResearchCount
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = Core;
@@ -902,7 +994,7 @@
   if (typeof document === 'undefined' || typeof window === 'undefined') return;
 
   var els = {};
-  var state = { scans: [], profiles: [], loading: false, timer: null, bankSort: { key: 'name', dir: 1 }, displayedProfiles: [] };
+  var state = { scans: [], profiles: [], research: null, loading: false, timer: null, bankSort: { key: 'name', dir: 1 }, displayedProfiles: [] };
   /* v63: the unsealed credentials live ONLY in this variable —
      memory, never storage. Locked means null, and refresh()
      does nothing while locked, so no API call can happen
@@ -1065,7 +1157,7 @@
   }
 
   function renderAll() {
-    var stats = Core.computeStats(state.scans, state.profiles);
+    var stats = Core.computeStats(state.scans, state.profiles, state.research);
     els.statsGrid.innerHTML = Core.renderStatsHtml(stats);
 
     els.profilesEmpty.hidden = state.profiles.length !== 0;
@@ -1142,6 +1234,13 @@
       .then(function (data) {
         state.scans = data.scans;
         state.profiles = data.profiles;
+        /* v81: refresh the research-frame count alongside the
+           main load; it resolves null on any failure and only
+           ever adds its stats card. */
+        Core.loadResearchCount(creds.endpoint, creds.adminKey).then(function (rc) {
+          state.research = rc;
+          if (rc) renderAll();
+        });
         els.statusBanner.hidden = true;
         if (els.lastUpdatedLine) els.lastUpdatedLine.textContent = 'Last updated ' + Core.fmtDhaka(Date.now());
         renderAll();
@@ -1348,7 +1447,7 @@
         adminKeyPresent: !!(sessionCreds && sessionCreds.adminKey),
         armed: drawerUi.armed, busy: drawerUi.busy,
         message: drawerUi.message, tone: drawerUi.tone
-      });
+      }, state.scans);
     }
 
     function rerenderBlockAction(profile) {

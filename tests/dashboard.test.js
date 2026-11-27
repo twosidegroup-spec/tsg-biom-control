@@ -482,6 +482,66 @@ async function main() {
   check('V79 ESCAPING hostile reason / IP text in the log renders as text',
     hostileLog.indexOf('<script>alert(7)</script>') === -1 && hostileLog.indexOf('&lt;script&gt;') !== -1 && hostileLog.indexOf('<b>1.2.3.4</b>') === -1);
 
+  /* ---- v80: impersonation + duplicate-enrolment flags, cross-match scan rows ---- */
+  const v80Scans = [
+    { id: 'x1', ts: 1764200000000, kind: 'money-auth', biomId: 'BIO-ATK', result: 'Denied', crossNeuralId: 'B5', crossNeuralScore: 0.55 },
+    { id: 'x2', ts: 1764300000000, kind: 'identify', biomId: '', result: 'Denied', crossEdccId: 'B5', crossEdccScore: 0.29, crossNeuralId: 'B5', crossNeuralScore: 0.61 },
+    { id: 'x3', ts: 1764400000000, kind: 'money-auth', biomId: 'BIO-ATK', result: 'Denied', fieldTest: true, crossNeuralId: 'B5', crossNeuralScore: 0.9 },
+    { id: 'x4', ts: 1764500000000, kind: 'enrol', biomId: 'B5', result: 'Enrolment Refused — Duplicate Palm', edccScore: 0.4 },
+    { id: 'x5', ts: 1764600000000, kind: 'enrol', biomId: 'B5', result: 'Enrolled' },
+    { id: 'x6', ts: 1764700000000, kind: 'money-auth', biomId: 'BIO-ATK', result: 'Denied', crossNeuralId: 'SOMEONE-ELSE', crossNeuralScore: 0.7 }
+  ];
+  const flaggedHtml = Core.renderBlockActionHtml({ biomId: 'B5', deleted: false, blocked: false }, { adminKeyPresent: true }, v80Scans);
+  check('V80 DOSSIER the impersonation flag counts only denied records naming this person (field-test excluded), with per-system strongest scores',
+    flaggedHtml.indexOf('Impersonation attempts targeting this person: 2 recorded') !== -1 &&
+    flaggedHtml.indexOf('strongest: EDCC 0.290 · PalmNet 0.610') !== -1 &&
+    flaggedHtml.indexOf('never blocked for being targeted') !== -1);
+  check('V80 DOSSIER the duplicate-enrolment flag counts refusal records only (a successful enrolment is not one)',
+    flaggedHtml.indexOf('Duplicate enrolment refused: 1 attempt to enrol this palm again') !== -1 &&
+    flaggedHtml.indexOf('nothing was created') !== -1);
+  const unflaggedHtml = Core.renderBlockActionHtml({ biomId: 'B6', deleted: false, blocked: false }, { adminKeyPresent: true }, v80Scans);
+  check('V80 DOSSIER a person named by no record shows neither flag',
+    unflaggedHtml.indexOf('Impersonation attempts targeting') === -1 && unflaggedHtml.indexOf('Duplicate enrolment refused') === -1);
+  const noScansHtml = Core.renderBlockActionHtml({ biomId: 'B5', deleted: false, blocked: false }, { adminKeyPresent: true });
+  check('V80 DOSSIER the flags render nothing when no scans are supplied (older callers unaffected)',
+    noScansHtml.indexOf('Impersonation attempts targeting') === -1 && noScansHtml.indexOf('Duplicate enrolment refused') === -1);
+  const cardHtml = Core.renderScanCardsHtml([
+    { id: 'c1', ts: 1764200000000, kind: 'money-auth', profileName: 'Fixture', biomId: '', result: 'Denied', edccScore: 0.1, palmnetScore: 0.2, crossEdccId: 'B5', crossEdccScore: 0.29, crossNeuralId: 'B5', crossNeuralScore: 0.61 }
+  ]);
+  check('V80 SCANS a card with cross-match evidence shows the closest other palm with both scores',
+    cardHtml.indexOf('Closest other palm') !== -1 && cardHtml.indexOf('B5 · EDCC 0.290 · PalmNet 0.610') !== -1);
+  const plainCardHtml = Core.renderScanCardsHtml([
+    { id: 'c2', ts: 1764200000000, kind: 'money-auth', profileName: 'Fixture', biomId: 'B5', result: 'Denied', edccScore: 0.1, palmnetScore: 0.2 }
+  ]);
+  check('V80 SCANS a pre-v80 record renders no cross-match row (byte-stable card)',
+    plainCardHtml.indexOf('Closest other palm') === -1);
+  const hostileCard = Core.renderScanCardsHtml([
+    { id: 'c3', ts: 1764200000000, kind: 'money-auth', profileName: 'Fixture', biomId: '', result: 'Denied', crossNeuralId: '<script>alert(9)</script>', crossNeuralScore: 0.5 }
+  ]);
+  check('V80 ESCAPING a hostile cross-match id renders as text, never markup',
+    hostileCard.indexOf('<script>alert(9)</script>') === -1 && hostileCard.indexOf('&lt;script&gt;') !== -1);
+
+  /* ---------- v81: research-frame count (simulation mode) ------ */
+  const statsR = Core.computeStats(data.scans, data.profiles, { bundles: 4, frames: 11, byDay: { '2026-11-27': 11 } });
+  check('V81 STATS computeStats carries the research count through', statsR.research && statsR.research.frames === 11 && statsR.research.bundles === 4);
+  const statsRHtml = Core.renderStatsHtml(statsR);
+  check('V81 STATS the stats strip gains a Research frames card when the API reported a count',
+    statsRHtml.indexOf('Research frames') !== -1 && statsRHtml.indexOf('>11<') !== -1 && statsRHtml.indexOf('4 bundles received') !== -1);
+  check('V81 STATS without a research count the strip is unchanged (no card)',
+    Core.renderStatsHtml(stats).indexOf('Research frames') === -1);
+  const rcOk = await Core.loadResearchCount('https://api.test', 'ak', function (url, opts) {
+    check('V81 COUNT the count is read from /api/admin/research with the ADMIN key (the route is admin-gated)',
+      url === 'https://api.test/api/admin/research' && opts.headers['x-admin-key'] === 'ak');
+    return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve({ bundles: 4, frames: 11, byDay: {} }); } });
+  });
+  check('V81 COUNT a well-formed count resolves through', !!rcOk && rcOk.frames === 11 && rcOk.bundles === 4);
+  const rcBad = await Core.loadResearchCount('https://api.test', 'ak', function () {
+    return Promise.resolve({ ok: false, status: 404, json: function () { return Promise.resolve({}); } });
+  });
+  check('V81 COUNT an older API without the route resolves null — the dashboard load is never broken by it', rcBad === null);
+  const rcNone = await Core.loadResearchCount('https://api.test', '', function () { throw new Error('must not be called'); });
+  check('V81 COUNT without an admin key the count is skipped (null), never attempted', rcNone === null);
+
   console.log('\n' + (fail === 0 ? 'ALL DASHBOARD TESTS PASSED (' + pass + ')' : fail + ' FAILURES, ' + pass + ' passed'));
   process.exit(fail === 0 ? 0 : 1);
 }
