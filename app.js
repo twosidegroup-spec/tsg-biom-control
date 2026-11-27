@@ -583,28 +583,40 @@
         : '<p class="ok-note" role="status">' + esc(ui.message) + '</p>')
       : '';
     var open = '<article class="profile-card detail-card"><h3>Access control</h3>';
+    /* v79 (category e): a rollback-guard tamper flag is shown
+       here for the Chairman's judgement — the server refused to
+       roll this wallet's ledger back; it is a flag, never an
+       automatic block, because a stale second device is a
+       legitimate cause. */
+    var tamperHtml = (p.tamperFlags && typeof p.tamperFlags.rollbackAttempts === 'number' && p.tamperFlags.rollbackAttempts > 0)
+      ? '<p class="form-error" role="alert">Ledger rollback attempts refused: ' + p.tamperFlags.rollbackAttempts +
+        (typeof p.tamperFlags.lastRollbackTs === 'number' ? ' (most recently ' + esc(fmtDhaka(p.tamperFlags.lastRollbackTs)) + ')' : '') +
+        '. A stale second device can cause this — if it was not theirs, consider blocking.</p>'
+      : '';
     if (!ui.adminKeyPresent) {
-      return open +
+      return open + tamperHtml +
         '<p class="fineprint">Blocking is not set up on this browser yet. Add the <strong>admin key</strong> in Settings → Connection to enable Block / Unblock here.</p>' +
         '<button type="button" class="btn btn-light" data-action="open-settings">Open Settings</button>' +
         msg + '</article>';
     }
     if (p.blocked === true) {
-      return open +
+      return open + tamperHtml +
         '<p><span class="badge badge-denied">Blocked</span></p>' +
         '<dl class="profile-meta">' +
+        '<div><dt>Blocked by</dt><dd>' + (p.blockedBy === 'system' ? 'System (auto-block)' : 'Chairman') + '</dd></div>' +
         (p.blockedTs ? '<div><dt>Blocked at</dt><dd>' + esc(fmtDhaka(p.blockedTs)) + '</dd></div>' : '') +
         (p.blockedReason ? '<div><dt>Reason</dt><dd>' + esc(p.blockedReason) + '</dd></div>' : '') +
+        (Array.isArray(p.blockedIps) && p.blockedIps.length ? '<div><dt>Blocked IPs</dt><dd>' + esc(p.blockedIps.join(', ')) + '</dd></div>' : '') +
         '</dl>' +
-        '<p class="fineprint">While blocked, this person\'s sync writes and payments are refused. Unblocking restores sync and payments — but their devices stay revoked, and re-registering a device is the path back.</p>' +
+        '<p class="fineprint">While blocked, this person\'s sync writes and payments are refused, and the IP addresses their account has been seen on are blocked too — a new wallet cannot be registered from the same network. Unblocking restores sync and payments and lifts the IP block — but their devices stay revoked, and re-registering a device is the path back.</p>' +
         (ui.armed
           ? '<button type="button" class="btn btn-primary" data-action="unblock-confirm"' + (ui.busy ? ' disabled' : '') + '>' + (ui.busy ? 'Working…' : 'Confirm unblock') + '</button> ' +
             '<button type="button" class="btn btn-light" data-action="block-cancel"' + (ui.busy ? ' disabled' : '') + '>Cancel</button>'
           : '<button type="button" class="btn btn-light" data-action="unblock-arm"' + (ui.busy ? ' disabled' : '') + '>Unblock this person</button>') +
         msg + '</article>';
     }
-    return open +
-      '<p class="fineprint">Blocking flags this Biom ID and revokes the person\'s devices at once. The API then refuses their sync writes and payments with a clear blocked error, and the app shows “This account has been blocked”. The action is recorded in the admin log (Settings → Admin activity).</p>' +
+    return open + tamperHtml +
+      '<p class="fineprint">Blocking flags this Biom ID and revokes the person\'s devices at once. The API then refuses their sync writes and payments with a clear blocked error, and the app shows “This account has been blocked”. Blocking also blocks the IP addresses this account has been seen on, so a new wallet cannot be registered from the same network; unblocking lifts the IP block. The action is recorded in the admin log (Settings → Admin activity).</p>' +
       (ui.armed
         ? '<label class="field"><span>Reason (optional)</span>' +
           '<input type="text" class="block-reason-input" placeholder="Why is this person blocked?" maxlength="280" spellcheck="false"></label>' +
@@ -618,19 +630,66 @@
     if (!Array.isArray(entries) || !entries.length) {
       return '<p class="empty-note">No block or unblock has been recorded yet.</p>';
     }
-    return '<table class="scans-table mini-table"><thead><tr>' +
-      '<th scope="col">When (Dhaka)</th><th scope="col">Action</th><th scope="col">Biom ID</th><th scope="col">Reason</th><th scope="col">Devices revoked</th>' +
+    /* v79: the log also carries WHO acted — the Chairman, or
+       the system itself (auto-block / auto-revocation) — and
+       device-revocation entries from the tamper rules. Entries
+       written before v79 carry no actor: they were all the
+       Chairman's manual actions and render as such. */
+    function actionBadge(e) {
+      if (e.action === 'revoke-device') return '<span class="badge badge-denied">Device revoked</span>';
+      if (e.action === 'block') return e.actor === 'system'
+        ? '<span class="badge badge-denied">Auto-block</span>'
+        : '<span class="badge badge-denied">Block</span>';
+      return '<span class="badge badge-verified">Unblock</span>';
+    }
+    function actorLabel(e) {
+      return e.actor === 'system' ? 'System (auto)' : 'Chairman';
+    }
+    function ipLine(e) {
+      var parts = [];
+      if (Array.isArray(e.blockedIps) && e.blockedIps.length) parts.push('IPs blocked: ' + e.blockedIps.join(', '));
+      if (Array.isArray(e.liftedIps) && e.liftedIps.length) parts.push('IPs lifted: ' + e.liftedIps.join(', '));
+      return parts.length ? '<div class="sub">' + esc(parts.join(' · ')) + '</div>' : '';
+    }
+    /* v79 render-gate fix: the six-column log (with the long
+       auto-block reasons) is wider than a phone card — it sits
+       in a horizontal scroll wrap so the page itself never
+       overflows; on desktop the table fits and nothing scrolls. */
+    return '<div class="table-scroll"><table class="scans-table mini-table"><thead><tr>' +
+      '<th scope="col">When (Dhaka)</th><th scope="col">Action</th><th scope="col">By</th><th scope="col">Biom ID</th><th scope="col">Reason</th><th scope="col">Devices revoked</th>' +
       '</tr></thead><tbody>' +
       entries.map(function (e) {
         return '<tr>' +
           '<td class="time">' + esc(fmtDhaka(e.ts)) + '</td>' +
-          '<td>' + (e.action === 'block' ? '<span class="badge badge-denied">Block</span>' : '<span class="badge badge-verified">Unblock</span>') + '</td>' +
-          '<td>' + esc(e.biomId || '') + '</td>' +
-          '<td>' + esc(e.reason || '—') + '</td>' +
+          '<td>' + actionBadge(e) + '</td>' +
+          '<td>' + esc(actorLabel(e)) + '</td>' +
+          '<td>' + esc(e.biomId || '—') + '</td>' +
+          '<td>' + esc(e.reason || '—') + ipLine(e) + '</td>' +
           '<td class="num">' + esc(Array.isArray(e.revokedDeviceIds) ? e.revokedDeviceIds.length : 0) + '</td>' +
           '</tr>';
       }).join('') +
-      '</tbody></table>';
+      '</tbody></table></div>';
+  }
+
+  /* v79: the blocked-IP registry (Settings → Admin activity).
+     An IP stays blocked while any blocked person's entry names
+     it; unblocking that person lifts their entries. */
+  function renderBlockedIpsHtml(entries) {
+    if (!Array.isArray(entries) || !entries.length) {
+      return '<p class="empty-note">No IP addresses are blocked right now. When a person is blocked, the networks their account has been seen on are blocked here too, so they cannot register a new wallet from the same network.</p>';
+    }
+    return '<div class="table-scroll"><table class="scans-table mini-table"><thead><tr>' +
+      '<th scope="col">IP address</th><th scope="col">Linked Biom ID</th><th scope="col">Blocked at (Dhaka)</th><th scope="col">By</th>' +
+      '</tr></thead><tbody>' +
+      entries.map(function (e) {
+        return '<tr>' +
+          '<td>' + esc(e.ip || '') + '</td>' +
+          '<td>' + esc(e.biomId || '') + '</td>' +
+          '<td class="time">' + esc(fmtDhaka(e.ts)) + '</td>' +
+          '<td>' + esc(e.actor === 'system' ? 'System (auto)' : 'Chairman') + '</td>' +
+          '</tr>';
+      }).join('') +
+      '</tbody></table></div>';
   }
 
   /* ---------------- API ---------------- */
@@ -706,6 +765,11 @@
 
   function adminLog(endpoint, adminKey, fetchFn) {
     return adminFetch(endpoint, adminKey, '/api/admin/log', null, fetchFn)
+      .then(function (json) { return Array.isArray(json.entries) ? json.entries : []; });
+  }
+
+  function adminBlockedIps(endpoint, adminKey, fetchFn) {
+    return adminFetch(endpoint, adminKey, '/api/admin/blocked-ips', null, fetchFn)
       .then(function (json) { return Array.isArray(json.entries) ? json.entries : []; });
   }
 
@@ -821,9 +885,11 @@
     renderPersonControlHtml: renderPersonControlHtml,
     renderBlockActionHtml: renderBlockActionHtml,
     renderAdminLogHtml: renderAdminLogHtml,
+    renderBlockedIpsHtml: renderBlockedIpsHtml,
     adminBlock: adminBlock,
     adminUnblock: adminUnblock,
     adminLog: adminLog,
+    adminBlockedIps: adminBlockedIps,
     fetchJson: fetchJson,
     loadAll: loadAll
   };
@@ -1116,7 +1182,7 @@
      unhides the node). Clear every rendered record container;
      the renderers repaint them on the next unlock + refresh. */
   function clearRendered() {
-    ['statsGrid', 'profilesGrid', 'scansBody', 'banksTableBody', 'recentScansBody', 'scansCards', 'bankDrawerBody', 'vaultHealth', 'adminLogBody'].forEach(function (id) {
+    ['statsGrid', 'profilesGrid', 'scansBody', 'banksTableBody', 'recentScansBody', 'scansCards', 'bankDrawerBody', 'vaultHealth', 'adminLogBody', 'blockedIpsBody'].forEach(function (id) {
       if (els[id]) els[id].innerHTML = '';
     });
   }
@@ -1143,9 +1209,23 @@
     if (!sessionCreds || !els.adminLogBody) return;
     if (!sessionCreds.adminKey) {
       els.adminLogBody.innerHTML = '<p class="empty-note">Add the admin key in Connection above to read the admin log — it is protected by the admin key, not the read key.</p>';
+      if (els.blockedIpsBody) els.blockedIpsBody.innerHTML = '';
       return;
     }
     els.adminLogBody.innerHTML = '<p class="fineprint">Loading the admin log…</p>';
+    /* v79: the blocked-IP registry loads alongside the log —
+       same key, same card. A failure here never hides the log:
+       the registry area carries its own quiet note. */
+    if (els.blockedIpsBody) {
+      els.blockedIpsBody.innerHTML = '<p class="fineprint">Loading blocked IP addresses…</p>';
+      Core.adminBlockedIps(sessionCreds.endpoint, sessionCreds.adminKey)
+        .then(function (entries) {
+          els.blockedIpsBody.innerHTML = Core.renderBlockedIpsHtml(entries);
+        })
+        .catch(function () {
+          els.blockedIpsBody.innerHTML = '<p class="empty-note">Could not load the blocked IP list. Try Refresh log.</p>';
+        });
+    }
     Core.adminLog(sessionCreds.endpoint, sessionCreds.adminKey)
       .then(function (entries) {
         els.adminLogBody.innerHTML = Core.renderAdminLogHtml(entries);
@@ -1182,7 +1262,7 @@
      'passwordInput', 'passwordConfirmInput', 'passwordLabel', 'fieldConfirmWrap', 'setupError', 'connectBtn',
      'setupIntroFresh', 'setupIntroMigrate', 'setupIntroManage', 'fieldEndpointWrap', 'fieldKeyWrap',
      'firstRunTextFresh', 'firstRunTextMigrate', 'firstRunSettingsBtn',
-     'adminActivityCard', 'adminLogBody', 'adminLogRefreshBtn', 'settingsBackBtn', 'settingsNavLink', 'bottomSettingsLink',
+     'adminActivityCard', 'adminLogBody', 'blockedIpsBody', 'adminLogRefreshBtn', 'settingsBackBtn', 'settingsNavLink', 'bottomSettingsLink',
      'lockForm', 'lockPasswordInput', 'lockError', 'unlockBtn', 'lockResetBtn',
      'errorBanner', 'errorText', 'reenterBtn',
      'statusBanner', 'statusText', 'statsGrid', 'profilesGrid', 'profilesEmpty',

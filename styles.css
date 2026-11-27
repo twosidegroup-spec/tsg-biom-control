@@ -278,6 +278,10 @@ section:first-of-type .section-title { margin-top: 6px; }
 
 .settings-stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-3); max-width: 760px; }
 .settings-card { min-width: 0; padding: 20px; }
+.settings-subhead { margin: 22px 0 6px; font-size: var(--type-heading); font-weight: 650; letter-spacing: -0.01em; }
+/* v79: wide admin tables scroll inside their card on narrow
+   screens instead of pushing the page sideways. */
+.table-scroll { overflow-x: auto; max-width: 100%; -webkit-overflow-scrolling: touch; }
 .settings-card .panel-head { border-bottom: 1px solid var(--line-soft); padding-bottom: 12px; }
 
 /* ---------- Banners ---------- */

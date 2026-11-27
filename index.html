@@ -183,10 +183,18 @@
         </div>
         <p class="muted">
           Every block and unblock is recorded on the server in an append-only log.
+          Blocks by the system itself (auto-block) are marked as such, with the reason.
           Unblocking restores a person's sync and payments, but their devices stay
           revoked — re-registering a device is the path back.
         </p>
         <div id="adminLogBody"></div>
+        <h4 class="settings-subhead">Blocked IP addresses</h4>
+        <p class="muted">
+          When a person is blocked — by you or by the system — the networks their
+          account has been seen on are blocked too: no new device and no new wallet
+          can be registered from them. Unblocking the person lifts their IPs.
+        </p>
+        <div id="blockedIpsBody"></div>
       </div>
 
       <p><button type="button" class="btn btn-light" id="settingsBackBtn" hidden>Back to dashboard</button></p>

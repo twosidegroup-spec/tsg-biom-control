@@ -425,6 +425,63 @@ async function main() {
   check('V78 ADMIN a 503 keeps its body on the error so the UI can say "not configured" (never fail open)',
     !!notConfigured && notConfigured.status === 503 && notConfigured.body.adminConfigured === false);
 
+  /* ---- v79: auto-block surfacing — actor, system entries, IPs, tamper flag ---- */
+  const log79 = Core.renderAdminLogHtml([
+    { id: 'b1', ts: 1764200000000, action: 'block', biomId: 'TSG-BIO-2841', actor: 'chairman', reason: 'Manual review', revokedDeviceIds: ['dev-1'], blockedIps: ['203.0.113.7'] },
+    { id: 'b2', ts: 1764300000000, action: 'block', biomId: 'TSG-BIO-3000', actor: 'system', reason: 'Auto-block (velocity escalation): 2 velocity holds within 1 day', revokedDeviceIds: ['dev-9'] },
+    { id: 'b3', ts: 1764400000000, action: 'revoke-device', biomId: '', actor: 'system', reason: 'Auto-revoked (technical tampering): 10 signature or sequence violations', revokedDeviceIds: ['dev-x'] },
+    { id: 'b4', ts: 1764500000000, action: 'unblock', biomId: 'TSG-BIO-2841', actor: 'chairman', reason: '', revokedDeviceIds: [], liftedIps: ['203.0.113.7'] },
+    { id: 'b5', ts: 1764600000000, action: 'block', biomId: 'TSG-BIO-OLD', reason: 'Pre-v79 manual block', revokedDeviceIds: [] }
+  ]);
+  check('V79 LOG the admin log has an actor column distinguishing the Chairman from the system',
+    log79.indexOf('<th scope="col">By</th>') !== -1 && log79.indexOf('System (auto)') !== -1 && log79.indexOf('Chairman') !== -1);
+  check('V79 LOG a system block reads Auto-block; a device revocation reads Device revoked; legacy entries read as the Chairman',
+    log79.indexOf('>Auto-block</span>') !== -1 && log79.indexOf('>Device revoked</span>') !== -1 &&
+    log79.indexOf('Pre-v79 manual block') !== -1);
+  check('V79 LOG IP effects ride the reason cell (blocked on block, lifted on unblock)',
+    log79.indexOf('IPs blocked: 203.0.113.7') !== -1 && log79.indexOf('IPs lifted: 203.0.113.7') !== -1);
+  const ipsHtml = Core.renderBlockedIpsHtml([
+    { ip: '203.0.113.7', biomId: 'TSG-BIO-2841', ts: 1764200000000, actor: 'chairman' },
+    { ip: '198.51.100.9', biomId: 'TSG-BIO-3000', ts: 1764300000000, actor: 'system' }
+  ]);
+  check('V79 IPS the blocked-IP table renders IP, linked person, time and actor',
+    ipsHtml.indexOf('203.0.113.7') !== -1 && ipsHtml.indexOf('TSG-BIO-3000') !== -1 && ipsHtml.indexOf('System (auto)') !== -1);
+  check('V79 IPS an empty registry explains itself (and the rule) instead of a blank',
+    Core.renderBlockedIpsHtml([]).indexOf('No IP addresses are blocked right now') !== -1);
+  const ipsCalls = [];
+  const ipsFetch = function (url, opts) {
+    ipsCalls.push({ url: url, opts: opts });
+    return Promise.resolve({ status: 200, ok: true, json: function () { return Promise.resolve({ ok: true, count: 1, entries: [{ ip: '203.0.113.7', biomId: 'B', ts: 1, actor: 'system' }], ips: ['203.0.113.7'] }); } });
+  };
+  const ipsEntries = await Core.adminBlockedIps('https://api.test/', 'admin-key-1', ipsFetch);
+  check('V79 IPS the registry reads via GET /api/admin/blocked-ips with the admin key in the header only',
+    ipsEntries.length === 1 && ipsCalls[0].url === 'https://api.test/api/admin/blocked-ips' &&
+    ipsCalls[0].opts.method === 'GET' && ipsCalls[0].opts.headers['x-admin-key'] === 'admin-key-1' && ipsCalls[0].url.indexOf('admin-key-1') === -1);
+  const autoBlockedHtml = Core.renderBlockActionHtml(
+    { biomId: 'B2', deleted: false, blocked: true, blockedBy: 'system', blockedTs: 1764200000000, blockedReason: 'Auto-block (spoofing): 5 spoof presentation verdicts', blockedIps: ['203.0.113.7', '198.51.100.9'] },
+    { adminKeyPresent: true });
+  check('V79 DOSSIER an auto-blocked person shows Blocked by System, the reason, and their blocked IPs',
+    autoBlockedHtml.indexOf('System (auto-block)') !== -1 && autoBlockedHtml.indexOf('Auto-block (spoofing)') !== -1 &&
+    autoBlockedHtml.indexOf('203.0.113.7') !== -1 && autoBlockedHtml.indexOf('lifts the IP block') !== -1);
+  const manualBlockedHtml = Core.renderBlockActionHtml(
+    { biomId: 'B3', deleted: false, blocked: true, blockedTs: 1764200000000, blockedReason: 'Fraud' },
+    { adminKeyPresent: true });
+  check('V79 DOSSIER a pre-v79 / manual block reads Blocked by Chairman (absent blockedBy is never shown as system)',
+    manualBlockedHtml.indexOf('<dt>Blocked by</dt><dd>Chairman</dd>') !== -1 && manualBlockedHtml.indexOf('System (auto-block)') === -1);
+  const tamperHtml = Core.renderBlockActionHtml(
+    { biomId: 'B4', deleted: false, blocked: false, tamperFlags: { rollbackAttempts: 2, lastRollbackTs: 1764200000000 } },
+    { adminKeyPresent: true });
+  check('V79 DOSSIER a rollback tamper flag is surfaced with its count and the stale-device caveat',
+    tamperHtml.indexOf('Ledger rollback attempts refused: 2') !== -1 && tamperHtml.indexOf('stale second device') !== -1);
+  const cleanHtml = Core.renderBlockActionHtml(FULL[0], { adminKeyPresent: true });
+  check('V79 DOSSIER a person with no flag shows no tamper warning',
+    cleanHtml.indexOf('Ledger rollback attempts refused') === -1);
+  const hostileLog = Core.renderAdminLogHtml([
+    { id: 'h1', ts: 1, action: 'block', biomId: 'B', actor: 'system', reason: '<script>alert(7)</script>', revokedDeviceIds: [], blockedIps: ['<b>1.2.3.4</b>'] }
+  ]);
+  check('V79 ESCAPING hostile reason / IP text in the log renders as text',
+    hostileLog.indexOf('<script>alert(7)</script>') === -1 && hostileLog.indexOf('&lt;script&gt;') !== -1 && hostileLog.indexOf('<b>1.2.3.4</b>') === -1);
+
   console.log('\n' + (fail === 0 ? 'ALL DASHBOARD TESTS PASSED (' + pass + ')' : fail + ' FAILURES, ' + pass + ' passed'));
   process.exit(fail === 0 ? 0 : 1);
 }
