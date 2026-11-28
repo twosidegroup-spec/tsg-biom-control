@@ -710,3 +710,99 @@ section:first-of-type .section-title { margin-top: 6px; }
   .stats { grid-template-columns: repeat(2, 1fr); }
   .bottom-nav-link { min-height: 48px; }
 }
+
+/* ================= v85 — TRUE LIQUID GLASS (dashboard) =================
+   The same recipe as the app v92, one system: the Chairman's
+   glossy blue capsules + gel pills, and the Pinterest board's
+   rules — a light ice-blue aurora with glow orbs behind
+   everything, frosted white glass (clear tier for stat cards,
+   the stronger scrim tier for data panels and tables, per the
+   pins' own rule that text sits on a scrim plate), a 1px white
+   rim brightest at the top-left, ONE radius scale (cards 20,
+   panels/sidebar 28, buttons full pills), soft blue-grey
+   shadows, and chrome that FLOATS detached — sidebar, bottom
+   nav, cards. CSS only: no seal, key or data code is touched,
+   so the Chairman's saved unlock carries over unchanged. */
+body{
+  --lg-clear:linear-gradient(135deg, rgba(255,255,255,.44), rgba(255,255,255,.20) 55%, rgba(255,255,255,.32));
+  --lg-scrim:linear-gradient(135deg, rgba(255,255,255,.82), rgba(255,255,255,.66));
+  --lg-rim:rgba(255,255,255,.75);
+  --lg-blur:blur(22px) saturate(1.75);
+  --lg-shadow:0 22px 44px rgba(11,44,177,.16), 0 4px 12px rgba(11,44,177,.08), inset 0 1px 0 rgba(255,255,255,.85), inset 1px 0 0 rgba(255,255,255,.35);
+  background:
+    radial-gradient(55% 38% at 88% -4%, rgba(55,129,252,.50), rgba(55,129,252,0) 62%),
+    radial-gradient(48% 36% at -8% 12%, rgba(139,124,255,.36), rgba(139,124,255,0) 60%),
+    radial-gradient(60% 42% at 108% 78%, rgba(45,212,191,.30), rgba(45,212,191,0) 62%),
+    radial-gradient(75% 50% at 50% -10%, rgba(203,233,253,.90), rgba(203,233,253,0) 65%),
+    linear-gradient(180deg,#E3EEFD 0%, #D8E9FC 48%, #E9F3FE 100%);
+  background-attachment:fixed}
+/* Data panels ride the scrim tier — frosted, but numbers first */
+.card{background:var(--lg-scrim);border:1px solid var(--lg-rim);box-shadow:var(--lg-shadow);
+  border-radius:20px;
+  -webkit-backdrop-filter:var(--lg-blur);backdrop-filter:var(--lg-blur)}
+/* Stat cards ride the clear tier — the aurora shows through */
+.stat{background:var(--lg-clear);border:1px solid var(--lg-rim);box-shadow:var(--lg-shadow);
+  border-radius:20px;
+  -webkit-backdrop-filter:var(--lg-blur);backdrop-filter:var(--lg-blur)}
+.scans-table th{background:rgba(255,255,255,.38)}
+/* Buttons: gel capsules, the same family as the app */
+.btn{border-radius:999px}
+.btn-primary{background:linear-gradient(180deg,#5B97FF 0%, #3781FC 30%, #1951FC 68%, #0B2CB1 100%);
+  border:1px solid rgba(255,255,255,.50);color:#fff;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.75), inset 0 -10px 18px rgba(3,25,91,.35), 0 16px 30px rgba(25,81,252,.42)}
+.btn-primary:hover:not(:disabled){background:linear-gradient(180deg,#3781FC 0%, #1951FC 45%, #0B2CB1 100%)}
+.btn-light{background:var(--lg-scrim);border:1px solid var(--lg-rim);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.9), 0 10px 22px rgba(11,44,177,.12)}
+/* The top app bar (phone) / sidebar shell: translucent navy glass */
+.sidebar{background:linear-gradient(135deg, rgba(3,25,91,.88), rgba(11,44,177,.84) 55%, rgba(25,81,252,.82));
+  border-bottom:1px solid rgba(255,255,255,.40);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.45), 0 16px 34px rgba(3,25,91,.28);
+  -webkit-backdrop-filter:var(--lg-blur);backdrop-filter:var(--lg-blur)}
+.banner{border:1px solid var(--lg-rim);box-shadow:var(--lg-shadow);
+  -webkit-backdrop-filter:var(--lg-blur);backdrop-filter:var(--lg-blur)}
+.drawer{background:var(--lg-scrim);
+  -webkit-backdrop-filter:var(--lg-blur);backdrop-filter:var(--lg-blur)}
+input,select,textarea{background:rgba(255,255,255,.62);border:1px solid var(--lg-rim);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.8)}
+@media (min-width:1024px){
+  /* The sidebar FLOATS detached over the aurora (the Flowy pin):
+     navy glass, rounded, a white glass pill on the active item */
+  .sidebar{margin:16px 0 16px 16px;border-radius:28px;height:calc(100vh - 32px);top:16px;
+    border:1px solid rgba(255,255,255,.35);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.40), 0 24px 48px rgba(3,25,91,.30)}
+  .side-nav-link{border-radius:999px}
+  .side-nav-link.active, .side-nav-link[aria-current="page"]{background:rgba(255,255,255,.22);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.45)}
+  .auth-split{background:var(--lg-scrim);border:1px solid var(--lg-rim);box-shadow:var(--lg-shadow);border-radius:28px}
+  .auth-brand{background:linear-gradient(160deg, rgba(3,25,91,.92), rgba(11,44,177,.88) 55%, rgba(25,81,252,.85))}
+}
+@media (max-width:1023px){
+  /* The bottom nav floats as a glass pill, like the app's */
+  .bottom-nav{left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom));
+    border-radius:28px;border-top:1px solid var(--lg-rim);
+    background:linear-gradient(135deg, rgba(255,255,255,.46), rgba(255,255,255,.24));
+    -webkit-backdrop-filter:blur(24px) saturate(1.8);backdrop-filter:blur(24px) saturate(1.8);
+    box-shadow:0 24px 48px rgba(3,25,91,.22), inset 0 1px 0 rgba(255,255,255,.9);padding-bottom:0}
+}
+
+/* ================= v86 — DECLUTTER =================
+   The Chairman's word (2026-11-28), the same order as app
+   v94: buttons were "clutter with fills" and the header
+   cluttered with the sidebar. Buttons go FLAT — one solid
+   fill, one soft shadow, no gel gradients, no glow — and the
+   shell top bar becomes one clean glass bar whose top aligns
+   with the floating sidebar's top. The dashboard has no
+   Install App button and never has had one; nothing to
+   remove there. */
+.btn-primary{background:#1951FC;border:1px solid rgba(255,255,255,.35);
+  box-shadow:0 10px 22px rgba(25,81,252,.28)}
+.btn-primary:hover:not(:disabled){background:#0B2CB1}
+.btn-light{background:rgba(255,255,255,.78);border:1px solid var(--lg-rim);
+  box-shadow:0 6px 16px rgba(11,44,177,.10)}
+@media (min-width:1024px){
+  .wrap{padding-top:16px}
+  .shell-topbar{background:var(--lg-scrim);border:1px solid var(--lg-rim);border-radius:20px;
+    box-shadow:var(--lg-shadow);padding:12px 16px;
+    -webkit-backdrop-filter:var(--lg-blur);backdrop-filter:var(--lg-blur)}
+  .last-updated{padding-bottom:0}
+}

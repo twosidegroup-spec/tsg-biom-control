@@ -186,8 +186,8 @@ async function main() {
     lockSubmit.indexOf('password.length') === -1 && lockSubmit.indexOf('unsealCredentials') !== -1);
 
   const dashCss = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
-  check('V64 the topbar is the solid house colour (no gradient) and linklike names a defined token',
-    dashCss.indexOf('linear-gradient') === -1 && dashCss.indexOf('color:var(--blue-600)') !== -1);
+  check('V64 the topbar names a defined token (v85 named pin change: the solid-no-gradient rule is superseded by the Chairman\'s liquid-glass order — the sidebar is navy glass now, pinned in the V85 checks)',
+    dashCss.indexOf('color:var(--blue-600)') !== -1 && dashCss.indexOf('v85 — TRUE LIQUID GLASS') !== -1);
   check('V64 cold-load skeletons exist in wiring + CSS, and the count line is a polite live region',
     src.indexOf('skelstat') !== -1 && src.indexOf('skelcard') !== -1 &&
     dashCss.indexOf('.skelbar') !== -1 && pageHtml.indexOf('id="scanCountLine" aria-live="polite"') !== -1);
@@ -728,6 +728,39 @@ async function main() {
     pageHtml.split('per web address').length - 1 >= 3 && pageHtml.indexOf('GitHub Pages') !== -1 && pageHtml.indexOf('Vercel') !== -1);
   check('V83 NAV job-named sections exist: Overview, People, Research Frames, Admin Log, Settings',
     pageHtml.indexOf('>People<') !== -1 && pageHtml.indexOf('id="adminLogNavLink"') !== -1 && pageHtml.indexOf('id="bottomAdminLogLink"') !== -1);
+
+
+  /* v85 (Chairman, 2026-11-28): TRUE LIQUID GLASS on the dashboard —
+     the app v92 recipe as one system (his capsules + the Pinterest
+     board): aurora field, clear/scrim glass tiers, gel-capsule
+     primary buttons, floating sidebar + bottom nav. CSS only. */
+  const v85At = dashCss.indexOf('v85 — TRUE LIQUID GLASS');
+  const v85 = v85At === -1 ? '' : dashCss.slice(v85At);
+  check('V85 GLASS the v85 layer exists and the aurora matches the app recipe (blue .50 / violet .36 / teal .30)',
+    v85At !== -1 && v85.indexOf('rgba(55,129,252,.50)') !== -1 && v85.indexOf('rgba(139,124,255,.36)') !== -1 && v85.indexOf('rgba(45,212,191,.30)') !== -1);
+  check('V85 GLASS data panels ride the scrim tier and stat cards the clear tier, both frosted at 20px radius',
+    v85.indexOf('.card{background:var(--lg-scrim)') !== -1 && v85.indexOf('.stat{background:var(--lg-clear)') !== -1 &&
+    v85.indexOf('--lg-blur:blur(22px) saturate(1.75)') !== -1);
+  check('V85 GLASS primary buttons are gel capsules in the Biom ramp',
+    v85.indexOf('linear-gradient(180deg,#5B97FF 0%, #3781FC 30%, #1951FC 68%, #0B2CB1 100%)') !== -1 && v85.indexOf('.btn{border-radius:999px}') !== -1);
+  check('V85 GLASS the desktop sidebar floats detached (16px inset, 28px radius, navy glass)',
+    v85.indexOf('.sidebar{margin:16px 0 16px 16px;border-radius:28px;height:calc(100vh - 32px);top:16px') !== -1);
+  check('V85 GLASS the phone bottom nav floats as a glass pill',
+    v85.indexOf('.bottom-nav{left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom))') !== -1 &&
+    v85.indexOf('blur(24px) saturate(1.8)') !== -1);
+
+  /* v86 (Chairman, 2026-11-28): DECLUTTER — flat buttons and a
+     clean shell top bar aligned with the floating sidebar (the
+     same order as app v94). */
+  const v86At = dashCss.indexOf('v86 — DECLUTTER');
+  const v86 = v86At === -1 ? '' : dashCss.slice(v86At);
+  check('V86 FLAT the v86 layer exists, after the v85 layer', v86At !== -1 && v86At > v85At);
+  check('V86 FLAT primary buttons are one solid fill with one soft shadow (no gradient in the layer)',
+    v86.indexOf('.btn-primary{background:#1951FC') !== -1 && v86.indexOf('linear-gradient') === -1);
+  check('V86 SHELL the desktop top bar is one glass bar aligned with the floating sidebar top',
+    v86.indexOf('.shell-topbar{background:var(--lg-scrim)') !== -1 && v86.indexOf('.wrap{padding-top:16px}') !== -1);
+  check('V86 the dashboard carries no Install App surface (HTML or JS)',
+    pageHtml.indexOf('Install App') === -1 && src.indexOf('beforeinstallprompt') === -1);
 
   console.log('\n' + (fail === 0 ? 'ALL DASHBOARD TESTS PASSED (' + pass + ')' : fail + ' FAILURES, ' + pass + ' passed'));
   process.exit(fail === 0 ? 0 : 1);
