@@ -532,19 +532,48 @@
         '<div><dt>Templates</dt><dd>' + counts.edcc + ' EDCC · ' + counts.emb + ' PalmNet</dd></div>' +
         (typeof p.edccBytes === 'number' ? '<div><dt>EDCC template size</dt><dd>' + p.edccBytes + ' bytes (sealed)</dd></div>' : '') +
         (typeof p.neuralDims === 'number' ? '<div><dt>PalmNet vector</dt><dd>' + p.neuralDims + ' dimensions (sealed)</dd></div>' : '') +
+        '<div><dt>Image</dt><dd>No consented image is linked to this person — research frames are anonymous by design (they carry only an anonymous research code, never a name or Biom ID), so no image can be shown here.</dd></div>' +
         '</dl>' +
         '<p class="field-note">Bank fingerprint (SHA-256 of the sealed bank)</p>' +
         '<p class="mono">' + esc(p.bankFingerprint) + '</p>' +
         '<p class="fineprint">This fingerprint identifies the sealed template bank and changes whenever the bank changes. It cannot be turned back into a palm — no palm image exists anywhere in this system.</p>';
     } else {
-      html += '<p class="fineprint">The bank fingerprint appears here once the API runs the v78 build. The palm itself is never shown — it exists only as sealed template code.</p>';
+      html += '<p class="fineprint">The bank fingerprint appears here once the API runs the v78 build. The palm itself is never shown — it exists only as sealed template code.</p>' +
+        '<p class="fineprint">Image: no consented image is linked to this person — research frames are anonymous by design (anonymous research code only, never a name or Biom ID), so no image can be shown here.</p>';
     }
     html += '</article>';
 
     /* --- wallet: balance + full ledger --- */
     var totals = walletTotals(p);
+    /* v82 (Phase 6, field audit): the linked-wallet rows. The
+       API stores a walletLink on the profile record (provider +
+       MASKED wallet number, bKash agreement links) but its full
+       summary does not serve that field yet — so when a summary
+       ever carries it, it renders here; until then the rows say
+       so plainly instead of guessing. The rail can also be read
+       honestly from the ledger mirror itself: every Add entry
+       carries the account type it came through. The full wallet
+       number is never stored server-side — only the masked
+       label on top-up entries — and is never invented here. */
+    var linkProvider = p.walletLink && p.walletLink.provider ? String(p.walletLink.provider) : '';
+    var linkMasked = p.walletLink && p.walletLink.maskedWallet ? String(p.walletLink.maskedWallet) : '';
+    var railSet = [];
+    if (linkProvider) railSet.push(linkProvider);
+    if (p.wallet && Array.isArray(p.wallet.statement)) {
+      p.wallet.statement.forEach(function (e) {
+        if (e && e.kind === 'add' && e.accountType && railSet.indexOf(e.accountType) === -1) railSet.push(e.accountType);
+      });
+    }
+    var railLabel = railSet.length
+      ? railSet.map(function (r) { return r === 'bkash' ? 'bKash' : (r === 'nagad' ? 'Nagad' : r); }).join(' · ')
+      : 'Not captured';
     html += '<article class="profile-card detail-card">' +
-      '<h3>Wallet</h3>';
+      '<h3>Wallet</h3>' +
+      '<dl class="profile-meta">' +
+      '<div><dt>Linked wallet</dt><dd>' + esc(linkMasked || 'Not served by the API summary yet') + '</dd></div>' +
+      '<div><dt>Rail</dt><dd>' + esc(railLabel) + '</dd></div>' +
+      '</dl>' +
+      '<p class="fineprint">The full wallet number is never stored on the server — a linked wallet is kept masked, and top-up entries below carry their masked account label.</p>';
     if (p.wallet && typeof p.wallet.balance === 'number') {
       var rows = [];
       (p.wallet.statement || []).forEach(function (e) {
@@ -864,6 +893,46 @@
       .then(function (json) { return Array.isArray(json.entries) ? json.entries : []; });
   }
 
+  /* v82 (Phase 6): research-frame withdrawal deletion. The API
+     (v81) deletes every stored bundle for ONE anonymous research
+     code via POST /api/admin/research-delete {researchId} and
+     answers {ok, researchId, removed} — removed = bundles removed.
+     Until v82 the dashboard showed the research count but had NO
+     control for this route, so the v81 privacy promise could not
+     be carried out from the dashboard at all. */
+  function adminResearchDelete(endpoint, adminKey, researchId, fetchFn) {
+    return adminFetch(endpoint, adminKey, '/api/admin/research-delete', { researchId: researchId }, fetchFn);
+  }
+
+  /* The research-delete control (Settings → Admin activity).
+     ui = { adminKeyPresent, code, armed, busy, message, tone }.
+     Two-step by design (Fraud Checking seat): typing a code and
+     tapping Delete only ARMS the control; the destructive POST
+     fires only from the separate Confirm button, and the wiring
+     refuses to confirm if the code changed after arming. With no
+     admin key sealed the control explains itself and renders no
+     actionable button at all. */
+  function renderResearchDeleteHtml(ui) {
+    ui = ui || {};
+    var msg = ui.message
+      ? (ui.tone === 'err'
+        ? '<p class="form-error" role="alert">' + esc(ui.message) + '</p>'
+        : '<p class="ok-note" role="status">' + esc(ui.message) + '</p>')
+      : '';
+    if (!ui.adminKeyPresent) {
+      return '<p class="fineprint">Research-frame deletion is not set up on this browser yet. Add the <strong>admin key</strong> in Connection above to enable it — deletion is protected by the admin key, not the read key.</p>' + msg;
+    }
+    if (ui.armed) {
+      return '<p class="fineprint">This permanently deletes every stored research bundle for this code from the research store. It cannot be undone from here.</p>' +
+        '<p class="mono">' + esc(ui.code || '') + '</p>' +
+        '<button type="button" class="btn btn-danger" data-action="research-delete-confirm"' + (ui.busy ? ' disabled' : '') + '>' + (ui.busy ? 'Working…' : 'Confirm delete') + '</button> ' +
+        '<button type="button" class="btn btn-light" data-action="research-delete-cancel"' + (ui.busy ? ' disabled' : '') + '>Cancel</button>' + msg;
+    }
+    return '<label class="field"><span>Research code</span>' +
+      '<input type="text" id="researchCodeInput" placeholder="res-…" spellcheck="false" autocomplete="off" value="' + esc(ui.code || '') + '"></label>' +
+      '<button type="button" class="btn btn-danger" data-action="research-delete-arm"' + (ui.busy ? ' disabled' : '') + '>Delete stored frames for this code</button>' + msg;
+  }
+
   /* ---------------- credential seal (v63) -----------------------
      AES-GCM-256 under a PBKDF2-SHA-256 key derived from the
      dashboard password (600,000 iterations, random 16-byte salt,
@@ -981,6 +1050,8 @@
     adminUnblock: adminUnblock,
     adminLog: adminLog,
     adminBlockedIps: adminBlockedIps,
+    adminResearchDelete: adminResearchDelete,
+    renderResearchDeleteHtml: renderResearchDeleteHtml,
     fetchJson: fetchJson,
     loadAll: loadAll,
     loadResearchCount: loadResearchCount
@@ -1003,6 +1074,11 @@
   var setupMode = 'fresh'; // 'fresh' | 'migrate' (pre-v63 plaintext) | 'manage' (v78 Settings, unlocked)
   /* v78: the drawer Block/Unblock control's transient state. */
   var drawerUi = { biomId: '', armed: false, busy: false, message: '', tone: '' };
+  /* v82: the research-delete control's transient state. armedCode
+     pins the code that was armed — a confirm with a different code
+     is refused, so the destructive POST can only ever target the
+     exact code the Chairman read back in the confirm step. */
+  var researchUi = { armed: false, armedCode: '', busy: false, message: '', tone: '' };
 
   function $(id) { return document.getElementById(id); }
 
@@ -1100,6 +1176,7 @@
         ? 'An admin key is saved on this browser (sealed). Block / Unblock is enabled.'
         : 'No admin key saved yet — Block / Unblock stays disabled until one is added.';
       els.fieldAdminRemoveWrap.hidden = !sessionCreds.adminKey;
+      renderResearchDelete();
       loadAdminLog();
     } else {
       els.endpointInput.disabled = false;
@@ -1281,13 +1358,14 @@
      unhides the node). Clear every rendered record container;
      the renderers repaint them on the next unlock + refresh. */
   function clearRendered() {
-    ['statsGrid', 'profilesGrid', 'scansBody', 'banksTableBody', 'recentScansBody', 'scansCards', 'bankDrawerBody', 'vaultHealth', 'adminLogBody', 'blockedIpsBody'].forEach(function (id) {
+    ['statsGrid', 'profilesGrid', 'scansBody', 'banksTableBody', 'recentScansBody', 'scansCards', 'bankDrawerBody', 'vaultHealth', 'adminLogBody', 'blockedIpsBody', 'researchDeleteBody'].forEach(function (id) {
       if (els[id]) els[id].innerHTML = '';
     });
   }
 
   function disconnect() {
     sessionCreds = null;
+    researchUi = { armed: false, armedCode: '', busy: false, message: '', tone: '' };
     clearStored();
     state.scans = [];
     state.profiles = [];
@@ -1340,8 +1418,59 @@
       });
   }
 
+  /* v82: the research-delete control (Settings → Admin activity).
+     Defined before lock()/disconnect() reset it. The confirm step
+     re-reads the armed code: if the input changed after arming,
+     nothing is sent and the control disarms with the reason. */
+  function renderResearchDelete() {
+    if (!els.researchDeleteBody) return;
+    var input = els.researchDeleteBody.querySelector('#researchCodeInput');
+    var code = researchUi.armed ? researchUi.armedCode : (input ? input.value : (researchUi.armedCode || ''));
+    els.researchDeleteBody.innerHTML = Core.renderResearchDeleteHtml({
+      adminKeyPresent: !!(sessionCreds && sessionCreds.adminKey),
+      code: code, armed: researchUi.armed, busy: researchUi.busy,
+      message: researchUi.message, tone: researchUi.tone
+    });
+  }
+
+  function runResearchDelete() {
+    if (!sessionCreds || !sessionCreds.adminKey || researchUi.busy) return;
+    var code = researchUi.armedCode;
+    researchUi.busy = true;
+    researchUi.message = '';
+    renderResearchDelete();
+    Core.adminResearchDelete(sessionCreds.endpoint, sessionCreds.adminKey, code)
+      .then(function (res) {
+        researchUi.busy = false;
+        researchUi.armed = false;
+        researchUi.armedCode = '';
+        researchUi.tone = 'ok';
+        var removed = res && typeof res.removed === 'number' ? res.removed : 0;
+        researchUi.message = removed > 0
+          ? 'Deleted. ' + removed + ' stored bundle' + (removed === 1 ? '' : 's') + ' removed for that research code.'
+          : 'Done — no stored bundles were found for that research code, so nothing was removed.';
+        renderResearchDelete();
+        /* keep the Overview research count honest after a delete */
+        Core.loadResearchCount(sessionCreds.endpoint, sessionCreds.adminKey).then(function (rc) {
+          state.research = rc;
+          renderAll();
+        });
+      })
+      .catch(function (err) {
+        researchUi.busy = false;
+        researchUi.tone = 'err';
+        if (err && err.status === 503) researchUi.message = 'Admin controls are not configured on the server. Set BIOM_ADMIN_KEY in the API project\'s environment variables on Vercel and redeploy — deletion stays off until then (it never fails open).';
+        else if (err && err.status === 401) researchUi.message = 'The admin key was refused by the API. Check the admin key in Connection above against BIOM_ADMIN_KEY on the server.';
+        else if (err && err.status === 400) researchUi.message = 'The API refused that research code. Check the code exactly as shown on the person\'s device and try again.';
+        else if (err && err.body && err.body.error) researchUi.message = 'The API refused: ' + err.body.error + '.';
+        else researchUi.message = 'Could not reach the API. Check your connection and try again.';
+        renderResearchDelete();
+      });
+  }
+
   function lock() {
     sessionCreds = null;
+    researchUi = { armed: false, armedCode: '', busy: false, message: '', tone: '' };
     state.scans = [];
     state.profiles = [];
     clearRendered();
@@ -1361,7 +1490,7 @@
      'passwordInput', 'passwordConfirmInput', 'passwordLabel', 'fieldConfirmWrap', 'setupError', 'connectBtn',
      'setupIntroFresh', 'setupIntroMigrate', 'setupIntroManage', 'fieldEndpointWrap', 'fieldKeyWrap',
      'firstRunTextFresh', 'firstRunTextMigrate', 'firstRunSettingsBtn',
-     'adminActivityCard', 'adminLogBody', 'blockedIpsBody', 'adminLogRefreshBtn', 'settingsBackBtn', 'settingsNavLink', 'bottomSettingsLink',
+     'adminActivityCard', 'adminLogBody', 'blockedIpsBody', 'researchDeleteBody', 'adminLogRefreshBtn', 'settingsBackBtn', 'settingsNavLink', 'bottomSettingsLink',
      'lockForm', 'lockPasswordInput', 'lockError', 'unlockBtn', 'lockResetBtn',
      'errorBanner', 'errorText', 'reenterBtn',
      'statusBanner', 'statusText', 'statsGrid', 'profilesGrid', 'profilesEmpty',
@@ -1396,6 +1525,39 @@
     }
     if (els.adminLogRefreshBtn) {
       els.adminLogRefreshBtn.addEventListener('click', loadAdminLog);
+    }
+    /* v82: research-delete delegation — arm / confirm / cancel.
+       Arm requires a non-empty code; confirm fires the POST only
+       for the exact armed code. */
+    if (els.researchDeleteBody) {
+      els.researchDeleteBody.addEventListener('click', function (ev) {
+        var btn = ev.target.closest ? ev.target.closest('[data-action]') : null;
+        if (!btn || researchUi.busy) return;
+        var action = btn.getAttribute('data-action');
+        if (action === 'research-delete-arm') {
+          var input = els.researchDeleteBody.querySelector('#researchCodeInput');
+          var code = input ? input.value.trim() : '';
+          if (!code) {
+            researchUi.tone = 'err';
+            researchUi.message = 'Enter the research code exactly as shown on the person\'s device first.';
+            renderResearchDelete();
+            var again = els.researchDeleteBody.querySelector('#researchCodeInput');
+            if (again) again.value = '';
+            return;
+          }
+          researchUi.armed = true;
+          researchUi.armedCode = code;
+          researchUi.message = '';
+          renderResearchDelete();
+        } else if (action === 'research-delete-cancel') {
+          researchUi.armed = false;
+          researchUi.message = '';
+          renderResearchDelete();
+        } else if (action === 'research-delete-confirm') {
+          if (!researchUi.armed || !researchUi.armedCode) return;
+          runResearchDelete();
+        }
+      });
     }
     document.querySelectorAll('.side-nav-link:not(#settingsNavLink), .bottom-nav-link:not(#bottomSettingsLink)').forEach(function (link) {
       link.addEventListener('click', function () {
@@ -1704,7 +1866,11 @@
             return finishSetup({ endpoint: endpoint, readKey: readKey, adminKey: freshAdminKey });
           });
         })
-        .then(function () { renderAll(); })
+        /* v82 fix: a fresh connect now refreshes like manage and
+           migrate do — previously it only re-rendered the setup-time
+           data, so the Research frames card (loaded inside refresh)
+           stayed missing until a manual Refresh. */
+        .then(function () { refresh(); })
         .catch(function (err) {
           if (err && err.adminErr) {
             els.setupError.textContent = err.adminErr.status === 503

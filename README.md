@@ -13,6 +13,14 @@ It shows, in one place, everything your devices sync to your own TSG Biom API:
   card with its deletion time, and the Overview count covers live banks only.
   Template and embedding *contents* are never displayed — counts only.
 
+**v82 (Phase 6):** Settings → Admin activity gains the research-frame withdrawal
+control — enter an anonymous research code, confirm, and every stored research
+bundle for that code is deleted via `POST /api/admin/research-delete` (the v81
+privacy promise, now operable from the dashboard). The person dossier also states
+the image position honestly (research frames are anonymous by design and are
+never linked to a person) and shows linked-wallet / rail rows from the data the
+server actually serves. The credential seal format is unchanged from v63–v81.
+
 The page is a plain static site (`index.html`, `styles.css`, `app.js`). There is no build
 step and there are no external dependencies — no CDNs, no frameworks, nothing to install.
 It is fully responsive: phone first, then tablet and desktop.

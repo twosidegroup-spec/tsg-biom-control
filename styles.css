@@ -576,7 +576,10 @@ section:first-of-type .section-title { margin-top: 6px; }
   .sidebar-collapse { display: block; margin-top: var(--space-3); }
   .shell-content { flex: 1 1 auto; }
   .wrap { padding: 26px 24px 48px; }
-  .stats { grid-template-columns: repeat(5, 1fr); }
+  /* v82 declutter: 3 even columns — with the Research frames card
+     the strip is six cards (two even rows); at five columns the
+     sixth card wrapped alone onto a ragged second row. */
+  .stats { grid-template-columns: repeat(3, 1fr); }
   .overview-panels { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
   .profiles { display: none; }
   .banks-table-wrap { display: block; }

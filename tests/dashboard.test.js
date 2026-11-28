@@ -542,6 +542,93 @@ async function main() {
   const rcNone = await Core.loadResearchCount('https://api.test', '', function () { throw new Error('must not be called'); });
   check('V81 COUNT without an admin key the count is skipped (null), never attempted', rcNone === null);
 
+  /* ---------- v82 (Phase 6): research-delete control, person
+     field audit, seal cross-compatibility -------------------- */
+  const rdCalls = [];
+  const rdFetch = function (url, opts) {
+    rdCalls.push({ url: url, opts: opts });
+    return Promise.resolve({ status: 200, ok: true, json: function () { return Promise.resolve({ ok: true, researchId: 'res-fixture-1', removed: 3 }); } });
+  };
+  const rdRes = await Core.adminResearchDelete('https://api.test/', 'admin-key-1', 'res-fixture-1', rdFetch);
+  check('V82 RESEARCH-DELETE posts to /api/admin/research-delete with {researchId} and the admin key in the header only',
+    rdRes.removed === 3 && rdCalls[0].url === 'https://api.test/api/admin/research-delete' &&
+    rdCalls[0].opts.method === 'POST' && rdCalls[0].opts.headers['x-admin-key'] === 'admin-key-1' &&
+    rdCalls[0].url.indexOf('admin-key-1') === -1 && JSON.parse(rdCalls[0].opts.body).researchId === 'res-fixture-1');
+  let rd400 = null;
+  try {
+    await Core.adminResearchDelete('https://api.test', 'ak', '', function () {
+      return Promise.resolve({ status: 400, ok: false, json: function () { return Promise.resolve({ error: 'researchId required' }); } });
+    });
+  } catch (e) { rd400 = e; }
+  check('V82 RESEARCH-DELETE a 400 keeps its body on the error so the UI can state the refusal plainly',
+    !!rd400 && rd400.status === 400 && rd400.body.error === 'researchId required');
+  const rdNoKey = Core.renderResearchDeleteHtml({ adminKeyPresent: false });
+  check('V82 RESEARCH-DELETE with no admin key sealed, the control explains itself and renders NO actionable button',
+    rdNoKey.indexOf('not set up on this browser') !== -1 && rdNoKey.indexOf('data-action="research-delete-arm"') === -1 &&
+    rdNoKey.indexOf('data-action="research-delete-confirm"') === -1 && rdNoKey.indexOf('researchCodeInput') === -1);
+  const rdUnarmed = Core.renderResearchDeleteHtml({ adminKeyPresent: true });
+  check('V82 RESEARCH-DELETE the unarmed state is an input + arm button only (no confirm exists yet)',
+    rdUnarmed.indexOf('id="researchCodeInput"') !== -1 && rdUnarmed.indexOf('data-action="research-delete-arm"') !== -1 &&
+    rdUnarmed.indexOf('data-action="research-delete-confirm"') === -1);
+  const rdArmed = Core.renderResearchDeleteHtml({ adminKeyPresent: true, armed: true, code: 'res-fixture-1' });
+  check('V82 RESEARCH-DELETE the armed state echoes the exact code, warns it is permanent, and offers confirm + cancel (two-step rule)',
+    rdArmed.indexOf('res-fixture-1') !== -1 && rdArmed.indexOf('permanently deletes') !== -1 &&
+    rdArmed.indexOf('data-action="research-delete-confirm"') !== -1 && rdArmed.indexOf('data-action="research-delete-cancel"') !== -1 &&
+    rdArmed.indexOf('researchCodeInput') === -1);
+  const rdBusy = Core.renderResearchDeleteHtml({ adminKeyPresent: true, armed: true, code: 'res-fixture-1', busy: true });
+  check('V82 RESEARCH-DELETE while busy, confirm and cancel are disabled (no double-fire)',
+    (rdBusy.match(/disabled/g) || []).length >= 2);
+  const rdHostile = Core.renderResearchDeleteHtml({ adminKeyPresent: true, armed: true, code: '<script>alert(5)</script>' });
+  check('V82 ESCAPING a hostile research code in the confirm echo renders as text',
+    rdHostile.indexOf('<script>alert(5)</script>') === -1 && rdHostile.indexOf('&lt;script&gt;') !== -1);
+  check('V82 RESEARCH-DELETE the control lives in Settings → Admin activity and the wiring pins the armed code',
+    pageHtml.indexOf('id="researchDeleteBody"') !== -1 && pageHtml.indexOf('id="researchDeleteBody"') > pageHtml.indexOf('id="adminActivityCard"') &&
+    dashAppSrc.indexOf("'research-delete-confirm'") !== -1 && dashAppSrc.indexOf("'research-delete-arm'") !== -1 &&
+    dashAppSrc.indexOf('researchUi.armedCode') !== -1 && dashAppSrc.indexOf('Core.adminResearchDelete(') !== -1);
+
+  /* Field audit (Phase 6 addition): image honesty + wallet rows */
+  check('V82 FIELDS the person view states the image position honestly (anonymous research frames, never linked)',
+    control.indexOf('No consented image is linked to this person') !== -1 && control.indexOf('anonymous by design') !== -1 &&
+    control.indexOf('<img') === -1);
+  check('V82 FIELDS the rail derives from real mirror data (the Add entry account type) when no walletLink is served',
+    control.indexOf('<dt>Rail</dt><dd>bKash</dd>') !== -1);
+  const linkedControl = Core.renderPersonControlHtml({ biomId: 'L1', name: 'Linked', deleted: false, walletLink: { provider: 'bkash', maskedWallet: '017•• •••8575', linkedTs: 1764000000000 }, wallet: { balance: 10, statement: [] } }, []);
+  check('V82 FIELDS a served walletLink renders its masked wallet number and rail (future-proof for the API gap fix)',
+    linkedControl.indexOf('017•• •••8575') !== -1 && linkedControl.indexOf('<dt>Rail</dt><dd>bKash</dd>') !== -1);
+  check('V82 FIELDS without a served walletLink the rows say so plainly — the full number is never invented',
+    legacyControl.indexOf('Not served by the API summary yet') !== -1 && legacyControl.indexOf('<dt>Rail</dt><dd>Not captured</dd>') !== -1 &&
+    legacyControl.indexOf('never stored on the server') !== -1);
+
+  /* Seal cross-compatibility, INDEPENDENT implementation: an
+     envelope built with Node's crypto directly from the v1 spec
+     (PBKDF2-SHA-256 600k, AES-256-GCM, tag appended — the exact
+     format the live pre-v82 code writes) must open with the final
+     Core, and a Core seal must open with the independent code.
+     This is the Chairman's unlock surviving the declutter. */
+  const nodeCrypto = require('crypto');
+  const fxSalt = Buffer.from('00112233445566778899aabbccddeeff', 'hex');
+  const fxIv = Buffer.from('0102030405060708090a0b0c', 'hex');
+  const fxKey = nodeCrypto.pbkdf2Sync('fixture-password-82', fxSalt, 600000, 32, 'sha256');
+  const fxCipher = nodeCrypto.createCipheriv('aes-256-gcm', fxKey, fxIv);
+  const fxPayload = JSON.stringify({ endpoint: 'https://api.test', readKey: 'rk-fixture', adminKey: 'ak-fixture' });
+  const fxCt = Buffer.concat([fxCipher.update(fxPayload, 'utf8'), fxCipher.final(), fxCipher.getAuthTag()]);
+  const fxSealed = { v: 1, iter: 600000, salt: fxSalt.toString('base64'), iv: fxIv.toString('base64'), ct: fxCt.toString('base64') };
+  const fxOpened = await Core.unsealCredentials('fixture-password-82', fxSealed);
+  check('V82 SEAL-COMPAT an envelope sealed by the CURRENT (pre-v82) algorithm opens with the final code, byte-exact',
+    fxOpened.endpoint === 'https://api.test' && fxOpened.readKey === 'rk-fixture' && fxOpened.adminKey === 'ak-fixture');
+  const coreSealed = await Core.sealCredentials('fixture-password-82', { endpoint: 'https://api.test', readKey: 'rk-fixture', adminKey: 'ak-fixture' });
+  const cKey = nodeCrypto.pbkdf2Sync('fixture-password-82', Buffer.from(coreSealed.salt, 'base64'), coreSealed.iter, 32, 'sha256');
+  const cRaw = Buffer.from(coreSealed.ct, 'base64');
+  const cDec = nodeCrypto.createDecipheriv('aes-256-gcm', cKey, Buffer.from(coreSealed.iv, 'base64'));
+  cDec.setAuthTag(cRaw.slice(cRaw.length - 16));
+  const cPt = Buffer.concat([cDec.update(cRaw.slice(0, cRaw.length - 16)), cDec.final()]).toString('utf8');
+  const cObj = JSON.parse(cPt);
+  check('V82 SEAL-COMPAT a seal written by the final code opens with the independent pre-v82 algorithm (reverse direction)',
+    cObj.readKey === 'rk-fixture' && cObj.adminKey === 'ak-fixture' && coreSealed.v === 1 && coreSealed.iter === 600000);
+  check('V82 the seal code itself is untouched by the declutter (same storage key, same envelope fields)',
+    dashAppSrc.indexOf("var LS_SEALED = 'tsgBiomControl.sealed';") !== -1 &&
+    dashAppSrc.indexOf('v: 1, iter: PBKDF2_ITERATIONS') !== -1);
+
   console.log('\n' + (fail === 0 ? 'ALL DASHBOARD TESTS PASSED (' + pass + ')' : fail + ' FAILURES, ' + pass + ' passed'));
   process.exit(fail === 0 ? 0 : 1);
 }
