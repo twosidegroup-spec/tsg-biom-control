@@ -33,6 +33,17 @@
  * the wallet ledger mirror, and Block/Unblock control backed
  * by the API's admin endpoints.
  *
+ * v83 (Phase 2 rebuild): job-named navigation (Overview, People,
+ * Research Frames, Admin Log, Settings) with one global search;
+ * per-section independent loading (a failing endpoint degrades
+ * only its own section, with its own retry); the Research Frames
+ * section NEVER vanishes silently — it always renders an
+ * explanatory state (no admin key / load failed / loaded);
+ * auto-refresh is ON by default, its preference persists across
+ * lock/unlock in its own storage key, and a visible freshness
+ * line states Live/Stale; seal format, crypto and storage keys
+ * are UNCHANGED from v82 (byte-compatible unlock).
+ *
  * The pure core (fetch, stats, filtering, HTML rendering, and
  * the seal/unseal crypto) is kept free of DOM access and
  * exported as window.TsgBiomCore (and as a Node module when
@@ -45,16 +56,23 @@
   var LS_ENDPOINT = 'tsgBiomControl.endpoint';
   var LS_READ_KEY = 'tsgBiomControl.readKey';
   var LS_SEALED = 'tsgBiomControl.sealed';
+  /* v83: the auto-refresh preference lives in its OWN key — it is
+     a display preference, not a credential, so it survives
+     lock/unlock (and even disconnect) without touching the seal. */
+  var LS_AUTO_REFRESH = 'tsgBiomControl.autoRefresh';
 
+  /* v84 (Chairman, 2026-11-28): plain words everywhere a person
+     reads — the dashboard's homepage above all. The kind CODES in
+     the records never change; only their labels do. */
   var KIND_LABELS = {
-    'enrol': 'Enrolment',
-    'verify': 'Verify',
-    'identify': 'Identify',
-    'wallet-open': 'Wallet open',
-    'money-auth': 'Money auth',
-    'topup': 'Top-up',
-    're-register': 'Re-register',
-    'delete-all': 'Delete all',
+    'enrol': 'Registered',
+    'verify': 'Palm check',
+    'identify': 'Identified at a shop',
+    'wallet-open': 'Opened wallet',
+    'money-auth': 'Biom Pay',
+    'topup': 'Strengthened palm',
+    're-register': 'Registered again',
+    'delete-all': 'Deleted account',
     'field-test': 'Field test',
     'owner-unlock': 'Owner unlock'
   };
@@ -151,6 +169,13 @@
          (they render as Removed cards) but they are not enrolled
          profiles — the stat counts live banks only. */
       profiles: profiles.filter(function (p) { return !(p && p.deleted === true); }).length,
+      /* v84 (Chairman, 2026-11-28): every Biom ID ever issued on
+         this server, removed ones included — his homepage order
+         is enrollments, blocked, IDs. */
+      idsTotal: profiles.length,
+      /* v83: comparison context for the KPI cards (Phase 1 D1) */
+      blocked: profiles.filter(function (p) { return p && p.blocked === true && p.deleted !== true; }).length,
+      scansLast24h: last === null ? 0 : scans.filter(function (x) { return typeof x.ts === 'number' && x.ts > last - 86400000 && x.ts <= last; }).length,
       lastScanTs: last,
       /* v81: the research-frame count (simulation mode), when
          the API reported it; null keeps the card hidden. */
@@ -190,10 +215,15 @@
         '<div class="stat-value' + (small ? ' small' : '') + '">' + esc(value) + '</div>' +
         (sub ? '<div class="stat-sub">' + esc(sub) + '</div>' : '') + '</div>';
     }
-    return card('Total scans', stats.totalScans, 'records synced') +
-      card('Verified', stats.verified, 'accepted scans', false, 'ok') +
-      card('Denied', stats.denied, 'refused scans', false, 'bad') +
-      card('Enrolled profiles', stats.profiles, 'palm banks synced') +
+    var pct = function (n) { return stats.totalScans ? Math.round(100 * n / stats.totalScans) + '% of all scans' : 'no scans yet'; };
+    /* v84 (Chairman, 2026-11-28): the homepage leads with HIS
+       numbers, in his order — enrollments, blocked, Biom IDs —
+       then the scan totals. */
+    return card('Enrollments', stats.profiles, 'people with a palm registered') +
+      card('Blocked', stats.blocked || 0, stats.blocked ? 'accounts stopped right now' : 'no accounts blocked', false, (stats.blocked || 0) > 0 ? 'bad' : '') +
+      card('Biom IDs', stats.idsTotal != null ? stats.idsTotal : stats.profiles, 'IDs issued in total, removed included') +
+      card('Total scans', stats.totalScans, 'records synced · ' + (stats.scansLast24h || 0) + ' in the last 24h') +
+      card('Verified', stats.verified, 'accepted scans · ' + pct(stats.verified), false, 'ok') +
       card('Last scan', stats.lastScanTs === null ? '—' : fmtDhaka(stats.lastScanTs), 'Asia/Dhaka', true) +
       /* v81: simulation/research mode — frames received for the
          detector research store, counted by the API's read-key
@@ -304,12 +334,18 @@
         : '<span class="badge badge-verified">Live</span>' +
           /* v78: a blocked person is flagged wherever their bank is listed */
           (p.blocked === true ? ' <span class="badge badge-denied">Blocked</span>' : '');
+      /* v84 (Chairman, 2026-11-28): the palm CODE rides the Palm
+         Bank table — short form here, the full code and every
+         palm detail in the person's dossier. */
+      var palmCode = typeof p.bankFingerprint === 'string' && p.bankFingerprint
+        ? '<span class="mono">' + esc(p.bankFingerprint.slice(0, 12)) + '…</span>' : '—';
       return '<tr data-biom-id="' + esc(p.biomId || '') + '">' +
         '<td data-label="Biom ID">' + esc(p.biomId || '') + '</td>' +
         '<td data-label="Name"><span class="profile-name">' + esc(p.deleted === true ? 'Removed' : (p.name || 'Unnamed profile')) + '</span></td>' +
+        '<td data-label="Palm code">' + palmCode + '</td>' +
         '<td data-label="Hand">' + esc(handLabel(p.hand)) + '</td>' +
-        '<td data-label="EDCC templates" class="num">' + c.edcc + '</td>' +
-        '<td data-label="PalmNet templates" class="num">' + c.emb + '</td>' +
+        '<td data-label="Pattern templates" class="num">' + c.edcc + '</td>' +
+        '<td data-label="AI templates" class="num">' + c.emb + '</td>' +
         '<td data-label="Version" class="num">' + esc(typeof p.version === 'number' ? p.version : '—') + '</td>' +
         '<td data-label="Status">' + status + '</td>' +
         '</tr>';
@@ -383,9 +419,12 @@
     return latest.map(function (s) {
       var profileCell = '<span class="profile-name">' + esc(s.profileName || '—') + '</span>' +
         (s.biomId ? '<span class="profile-id">' + esc(s.biomId) + '</span>' : '');
+      /* v84: the homepage feed answers his question — WHO did
+         WHAT (registered, strengthened, paid) — in plain words. */
       return '<tr>' +
         '<td data-label="Time" class="time">' + esc(fmtDhaka(s.ts)) + '</td>' +
         '<td data-label="Profile">' + profileCell + '</td>' +
+        '<td data-label="Activity">' + esc(kindLabel(s.kind)) + '</td>' +
         '<td data-label="Result">' + resultBadgeHtml(s.result) + '</td>' +
         '</tr>';
     }).join('');
@@ -834,6 +873,105 @@
       .catch(function () { return null; });
   }
 
+  /* v83: per-section loading. Each endpoint settles on its own:
+     one failing endpoint degrades only its own section (the UI
+     keeps the other section's data and gives the failed section
+     its own retry) instead of the old all-or-nothing loadAll. */
+  function loadSections(endpoint, readKey, fetchFn) {
+    function settle(promise, key) {
+      return promise.then(function (items) {
+        var out = { ok: true }; out[key] = items; return out;
+      }).catch(function (err) {
+        var out = { ok: false, error: err }; out[key] = null; return out;
+      });
+    }
+    return Promise.all([
+      settle(fetchJson(endpoint, readKey, '/api/scans', fetchFn).then(function (j) { return Array.isArray(j.scans) ? j.scans : []; }), 'scans'),
+      settle(fetchJson(endpoint, readKey, '/api/profiles?summary=1', fetchFn).then(function (j) { return Array.isArray(j.profiles) ? j.profiles : []; }), 'profiles')
+    ]).then(function (r) { return { scans: r[0], profiles: r[1] }; });
+  }
+
+  /* v83: the research count WITH its reason. loadResearchCount
+     (v81) swallows every failure into null — which is why the
+     card used to vanish silently. This state version says WHY:
+     'no-admin-key' (nothing was attempted), 'error' (attempted,
+     failed, here is the error), or 'ok' with the counts. */
+  function loadResearchState(endpoint, adminKey, fetchFn) {
+    if (!adminKey) return Promise.resolve({ status: 'no-admin-key' });
+    return adminFetch(endpoint, adminKey, '/api/admin/research', null, fetchFn)
+      .then(function (j) {
+        if (!j || typeof j.frames !== 'number') return { status: 'error', error: apiError(0, 'The API answered without a frame count.') };
+        return { status: 'ok', bundles: typeof j.bundles === 'number' ? j.bundles : 0, frames: j.frames, byDay: j.byDay || {} };
+      })
+      .catch(function (err) { return { status: 'error', error: err }; });
+  }
+
+  /* v83: the Research Frames section ALWAYS renders — never an
+     absent card. Every state is What + Why + Next (Phase 1 G4). */
+  function renderResearchCardHtml(rs) {
+    rs = rs || { status: 'loading' };
+    var head = '<div class="panel-head"><h3>Research Frames</h3></div>';
+    if (rs.status === 'ok') {
+      return head + '<p class="stat-value num">' + esc(rs.frames) + '</p>' +
+        '<p class="muted">' + esc(rs.bundles) + ' stored bundles received (simulation / research mode). These frames are anonymous by design — each bundle carries only an anonymous research code, never a name or Biom ID — so frames are counted and deleted by code, never linked to a person.</p>' +
+        '<p class="fineprint">Withdrawal: a person quotes the research code shown on their device; delete it in Settings → Admin Log → Research frames.</p>';
+    }
+    if (rs.status === 'no-admin-key') {
+      return head + '<p class="empty-note">Research frames are not shown on this browser yet — because no <strong>admin key</strong> is saved here, and the research count is protected by the admin key, not the read key. Nothing is broken and no frames are hidden from the server. Next: add the admin key in Settings → Connection, then this section loads.</p>';
+    }
+    if (rs.status === 'error') {
+      var why = rs.error && rs.error.status === 401 ? 'the admin key was refused by the API'
+        : rs.error && rs.error.status === 503 ? 'admin controls are not configured on the server (BIOM_ADMIN_KEY is not set)'
+        : rs.error && rs.error.status ? 'the API answered with an error (HTTP ' + rs.error.status + ')'
+        : 'the API could not be reached';
+      return head + '<p class="empty-note">The research frame count could not be loaded — ' + esc(why) + '. The rest of the dashboard is unaffected. Next: check the admin key in Settings → Connection, or retry.</p>' +
+        '<button type="button" class="btn btn-light" data-action="research-retry">Retry research frames</button>';
+    }
+    return head + '<div class="skelcard" aria-hidden="true"><div class="skelbar w40"></div><div class="skelbar w65"></div></div><p class="fineprint">Loading research frames…</p>';
+  }
+
+  /* v83: a section-level error (What + Why + Next) with the
+     section's own retry. section is a stable key the wiring maps
+     back to a loader ('scans' | 'profiles'). */
+  function renderSectionErrorHtml(section, err) {
+    var label = section === 'profiles' ? 'People' : 'Scan Log';
+    var why = err && err.status === 401 ? 'the read key was refused by the API (unauthorised) — the key sealed in this browser does not match the READ_KEY on the server'
+      : err && err.status ? 'the API answered with an error (HTTP ' + err.status + ')'
+      : 'the API could not be reached — check the endpoint address and your connection';
+    return '<p class="empty-note" role="alert">' + esc(label) + ' could not be loaded — ' + esc(why) + '. ' +
+      'Other sections are unaffected and any records already shown are unchanged. Next: retry this section.</p>' +
+      '<button type="button" class="btn btn-light" data-retry-section="' + esc(section) + '">Retry ' + esc(label) + '</button>';
+  }
+
+  /* v83: one global search across people and scan records —
+     name, Biom ID, palm code (the sealed-bank fingerprint),
+     registration IP and latest IP (Phase 1 A2/E5). */
+  function globalSearch(profiles, scans, query) {
+    var q = String(query || '').trim().toLowerCase();
+    if (!q) return { people: [], scans: [] };
+    function hit(parts) { return parts.some(function (x) { return x && String(x).toLowerCase().indexOf(q) !== -1; }); }
+    return {
+      people: (profiles || []).filter(function (p) {
+        return p && hit([p.name, p.biomId, p.bankFingerprint, p.regIp, p.lastIp, p.phone]);
+      }),
+      scans: (scans || []).filter(function (x) {
+        return x && hit([x.profileName, x.biomId, x.ip]);
+      })
+    };
+  }
+
+  /* v83: auto-refresh preference. Default ON; the stored value
+     is the string '0'/'1' under LS_AUTO_REFRESH. store is any
+     getItem/setItem object (localStorage in the browser). */
+  function readAutoRefreshPref(store) {
+    try { var v = store && store.getItem(LS_AUTO_REFRESH); return v === null || v === undefined ? true : v !== '0'; }
+    catch (e) { return true; }
+  }
+  function writeAutoRefreshPref(store, on) {
+    try { if (store) store.setItem(LS_AUTO_REFRESH, on ? '1' : '0'); } catch (e) { /* storage unavailable */ }
+    return !!on;
+  }
+
   function loadAll(endpoint, readKey, fetchFn) {
     return Promise.all([
       fetchJson(endpoint, readKey, '/api/scans', fetchFn),
@@ -1054,7 +1192,15 @@
     renderResearchDeleteHtml: renderResearchDeleteHtml,
     fetchJson: fetchJson,
     loadAll: loadAll,
-    loadResearchCount: loadResearchCount
+    loadSections: loadSections,
+    loadResearchCount: loadResearchCount,
+    loadResearchState: loadResearchState,
+    renderResearchCardHtml: renderResearchCardHtml,
+    renderSectionErrorHtml: renderSectionErrorHtml,
+    globalSearch: globalSearch,
+    readAutoRefreshPref: readAutoRefreshPref,
+    writeAutoRefreshPref: writeAutoRefreshPref,
+    LS_AUTO_REFRESH: LS_AUTO_REFRESH
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = Core;
@@ -1065,7 +1211,7 @@
   if (typeof document === 'undefined' || typeof window === 'undefined') return;
 
   var els = {};
-  var state = { scans: [], profiles: [], research: null, loading: false, timer: null, bankSort: { key: 'name', dir: 1 }, displayedProfiles: [] };
+  var state = { scans: [], profiles: [], research: null, researchState: { status: 'loading' }, sectionErrors: { scans: null, profiles: null }, lastUpdatedTs: null, bankPage: 0, scanPage: 0, bankQueryKey: '', scanQueryKey: '', loading: false, timer: null, bankSort: { key: 'name', dir: 1 }, displayedProfiles: [] };
   /* v63: the unsealed credentials live ONLY in this variable —
      memory, never storage. Locked means null, and refresh()
      does nothing while locked, so no API call can happen
@@ -1211,6 +1357,7 @@
     els.mainView.hidden = false;
     els.topbarActions.hidden = false;
     els.endpointChip.textContent = sessionCreds ? sessionCreds.endpoint : '';
+    applyAutoRefreshPref();
   }
 
   function showError(err) {
@@ -1233,11 +1380,44 @@
     els.errorBanner.hidden = false;
   }
 
+  /* v83: the freshness line always says whether the data is
+     live or may be stale, and when it was last loaded. */
+  function stampFreshness() {
+    if (!els.lastUpdatedLine) return;
+    var on = !!(els.autoRefreshToggle && els.autoRefreshToggle.checked) && state.timer !== null;
+    els.lastUpdatedLine.textContent = state.lastUpdatedTs
+      ? 'Updated ' + Core.fmtDhaka(state.lastUpdatedTs) + (on ? ' · Live — auto-refresh on (30s)' : ' · Auto-refresh off — this data may be stale')
+      : (on ? 'Auto-refresh on (30s) — loading…' : 'Auto-refresh off');
+  }
+
+  function renderResearch() {
+    if (els.researchBody) els.researchBody.innerHTML = Core.renderResearchCardHtml(state.researchState);
+  }
+
+  function renderSectionErrors() {
+    if (els.scansError) els.scansError.innerHTML = state.sectionErrors.scans ? Core.renderSectionErrorHtml('scans', state.sectionErrors.scans) : '';
+    if (els.profilesError) els.profilesError.innerHTML = state.sectionErrors.profiles ? Core.renderSectionErrorHtml('profiles', state.sectionErrors.profiles) : '';
+  }
+
+  /* v83: the research section loads independently of the main
+     sections — its failure or missing key never touches them. */
+  function loadResearch() {
+    var creds = sessionCreds;
+    if (!creds || !els.researchBody) return Promise.resolve();
+    if (state.researchState.status !== 'ok') { state.researchState = { status: 'loading' }; renderResearch(); }
+    return Core.loadResearchState(creds.endpoint, creds.adminKey).then(function (rs) {
+      state.researchState = rs;
+      state.research = rs.status === 'ok' ? { bundles: rs.bundles, frames: rs.frames, byDay: rs.byDay } : null;
+      renderResearch();
+      if (!state.loading) renderAll();
+    });
+  }
+
   function renderAll() {
     var stats = Core.computeStats(state.scans, state.profiles, state.research);
     els.statsGrid.innerHTML = Core.renderStatsHtml(stats);
 
-    els.profilesEmpty.hidden = state.profiles.length !== 0;
+    els.profilesEmpty.hidden = state.profiles.length !== 0 || !!state.sectionErrors.profiles;
 
     var currentKind = els.kindFilter.value;
     els.kindFilter.innerHTML = Core.renderKindOptionsHtml(state.scans, currentKind);
@@ -1250,9 +1430,24 @@
       result: els.resultFilter.value,
       query: els.searchInput.value
     });
-    els.scansBody.innerHTML = Core.renderScansRowsHtml(filtered);
-    if (els.scansCards) els.scansCards.innerHTML = Core.renderScanCardsHtml(filtered);
-    els.scansEmpty.hidden = filtered.length !== 0;
+    /* v83: Scan Log pagination — 25 per page, table and phone
+       cards page together; the query/kind/result set is the key
+       that resets the page. */
+    var scanKey = (els.searchInput.value || '') + '|' + els.kindFilter.value + '|' + els.resultFilter.value;
+    if (state.scanQueryKey !== scanKey) { state.scanQueryKey = scanKey; state.scanPage = 0; }
+    var scanPages = Math.max(1, Math.ceil(filtered.length / 25));
+    if (state.scanPage >= scanPages) state.scanPage = scanPages - 1;
+    var pagedScans = filtered.slice(state.scanPage * 25, state.scanPage * 25 + 25);
+    els.scansBody.innerHTML = Core.renderScansRowsHtml(pagedScans);
+    if (els.scansCards) els.scansCards.innerHTML = Core.renderScanCardsHtml(pagedScans);
+    els.scansEmpty.hidden = filtered.length !== 0 || !!state.sectionErrors.scans;
+    if (els.scansPager) {
+      els.scansPager.innerHTML = filtered.length > 25
+        ? '<button type="button" class="btn btn-light" data-scan-page="prev"' + (state.scanPage === 0 ? ' disabled' : '') + '>Previous</button>' +
+          '<span class="count-line">Page ' + (state.scanPage + 1) + ' of ' + scanPages + '</span>' +
+          '<button type="button" class="btn btn-light" data-scan-page="next"' + (state.scanPage >= scanPages - 1 ? ' disabled' : '') + '>Next</button>'
+        : '';
+    }
 
     /* v66: Overview panels + Palm Banks table/drawer data */
     if (els.recentScansBody) {
@@ -1271,77 +1466,160 @@
       }
       return true;
     });
-    state.displayedProfiles = shownProfiles;
-    els.profilesGrid.innerHTML = Core.renderProfilesHtml(shownProfiles);
+    /* v83: People pagination (Carbon anatomy) — 25 per page,
+       same page for the desktop table and the phone card list. */
+    var queryKey = pq + '|' + pstatus + '|' + state.bankSort.key + '|' + state.bankSort.dir;
+    if (state.bankQueryKey !== queryKey) { state.bankQueryKey = queryKey; state.bankPage = 0; }
+    var sortedProfiles = Core.sortProfiles(shownProfiles, state.bankSort.key, state.bankSort.dir);
+    var bankPages = Math.max(1, Math.ceil(sortedProfiles.length / 25));
+    if (state.bankPage >= bankPages) state.bankPage = bankPages - 1;
+    var pagedProfiles = sortedProfiles.slice(state.bankPage * 25, state.bankPage * 25 + 25);
+    state.displayedProfiles = pagedProfiles;
+    els.profilesGrid.innerHTML = Core.renderProfilesHtml(pagedProfiles);
     if (els.banksTableBody) {
-      els.banksTableBody.innerHTML = Core.renderBanksRowsHtml(
-        Core.sortProfiles(shownProfiles, state.bankSort.key, state.bankSort.dir));
+      els.banksTableBody.innerHTML = Core.renderBanksRowsHtml(pagedProfiles);
     }
+    if (els.banksPager) {
+      els.banksPager.innerHTML = sortedProfiles.length > 25
+        ? '<button type="button" class="btn btn-light" data-bank-page="prev"' + (state.bankPage === 0 ? ' disabled' : '') + '>Previous</button>' +
+          '<span class="count-line">Page ' + (state.bankPage + 1) + ' of ' + bankPages + ' · ' + sortedProfiles.length + ' people</span>' +
+          '<button type="button" class="btn btn-light" data-bank-page="next"' + (state.bankPage >= bankPages - 1 ? ' disabled' : '') + '>Next</button>'
+        : '';
+    }
+    /* v83: the sorted column — and only it — shows its state. */
+    document.querySelectorAll('.sort-btn').forEach(function (btn) {
+      var key = btn.getAttribute('data-sort');
+      if (!btn.getAttribute('data-label')) btn.setAttribute('data-label', btn.textContent);
+      btn.textContent = btn.getAttribute('data-label') + (key === state.bankSort.key ? (state.bankSort.dir === 1 ? ' \u2191' : ' \u2193') : '');
+    });
     if (els.banksEmpty) els.banksEmpty.hidden = !(state.profiles.length !== 0 && shownProfiles.length === 0);
     els.scanCountLine.textContent = state.scans.length === 0
       ? 'No scan records yet.'
       : 'Showing ' + filtered.length + ' of ' + state.scans.length + ' scan records, newest first.';
+    /* v83: global search — matching people are listed grouped
+       above the sections (the scan log below is already filtered
+       by the same query). */
+    if (els.globalSearchResults) {
+      var q = els.searchInput.value.trim();
+      if (!q) { els.globalSearchResults.hidden = true; els.globalSearchResults.innerHTML = ''; }
+      else {
+        var hits = Core.globalSearch(state.profiles, state.scans, q);
+        els.globalSearchResults.hidden = false;
+        els.globalSearchResults.innerHTML = '<div class="panel-head"><h3>People matching \u201c' + Core.esc(q) + '\u201d</h3></div>' +
+          (hits.people.length
+            ? hits.people.map(function (p) {
+              var ipLine = [p.regIp ? 'Registered from ' + p.regIp : '', p.lastIp ? 'Last IP ' + p.lastIp : ''].filter(Boolean).join(' \u00b7 ');
+              return '<button type="button" class="profile-card global-hit" data-biom-id="' + Core.esc(p.biomId || '') + '"><h3>' + Core.esc(p.name || 'Unnamed profile') + '</h3>' +
+                '<div class="biom-id">' + Core.esc(p.biomId || '') + '</div>' +
+                '<p class="fineprint">' + Core.esc(ipLine || 'No IP captured') + '</p></button>';
+            }).join('')
+            : '<p class="empty-note">No people match \u201c' + Core.esc(q) + '\u201d. The search covers name, Biom ID, palm code and IP address. Next: check the spelling, or clear the search to see everyone.</p>') +
+          '<p class="count-line">' + hits.scans.length + ' scan record' + (hits.scans.length === 1 ? '' : 's') + ' match below in the Scan Log.</p>';
+      }
+    }
+    renderSectionErrors();
   }
 
-  function refresh() {
+  /* v84 (Chairman, 2026-11-28): SILENT refresh — the auto-refresh
+     tick must feel real-time: no "Loading…" banner, no button
+     flicker, no skeleton, and no re-render at all when nothing
+     changed. New data swaps in place; a silent failure keeps the
+     data already on screen. Manual refresh keeps its feedback. */
+  function dataSignature() {
+    var s = state.scans.map(function (x) { return [x.id || '', x.ts || 0, x.result || ''].join(':'); }).join('|');
+    var p = state.profiles.map(function (x) { return [x.biomId || '', x.version || 0, x.blocked ? 1 : 0, x.deleted ? 1 : 0].join(':'); }).join('|');
+    return s.length + '/' + p.length + '/' + s + '/' + p;
+  }
+  function refresh(silent) {
     var creds = sessionCreds;
     if (!creds || state.loading) return Promise.resolve();
+    var isSilent = silent === true && (state.scans.length > 0 || state.profiles.length > 0);
     state.loading = true;
-    els.refreshBtn.disabled = true;
-    els.errorBanner.hidden = true;
-    els.statusBanner.hidden = false;
-    els.statusText.textContent = 'Loading records…';
-    /* v64 (Seat 1 L-1 / Seat 3 R-UX7): on a cold load (nothing
-       rendered yet) the grids hold skeleton blocks while the fetch
-       runs — never an empty frame and never the "no profiles" note
-       mid-flight. renderAll replaces them wholesale on success; on
-       failure they are cleared so the error banner stands alone. */
+    if (!isSilent) {
+      els.refreshBtn.disabled = true;
+      els.errorBanner.hidden = true;
+      els.statusBanner.hidden = false;
+      els.statusText.textContent = 'Loading records…';
+    }
+    /* Cold load: skeleton blocks in the final geometry while the
+       fetch runs — never an empty frame, never the "no profiles"
+       note mid-flight (v64 rule, kept in v83). */
     if (!state.scans.length && !state.profiles.length) {
       els.statsGrid.innerHTML = '<div class="skelstat"><div class="skelbar w40"></div><div class="skelbar w65"></div></div>' +
         '<div class="skelstat"><div class="skelbar w40"></div><div class="skelbar w65"></div></div>' +
         '<div class="skelstat"><div class="skelbar w40"></div><div class="skelbar w65"></div></div>';
-      if (els.banksTableBody) els.banksTableBody.innerHTML = '<tr class="skeltrow"><td colspan="7"><div class="skelbar w65"></div></td></tr>' +
-        '<tr class="skeltrow"><td colspan="7"><div class="skelbar w40"></div></td></tr>';
-      if (els.recentScansBody) els.recentScansBody.innerHTML = '<tr class="skeltrow"><td colspan="3"><div class="skelbar w85"></div></td></tr>';
+      if (els.banksTableBody) els.banksTableBody.innerHTML = '<tr class="skeltrow"><td colspan="8"><div class="skelbar w65"></div></td></tr>' +
+        '<tr class="skeltrow"><td colspan="8"><div class="skelbar w40"></div></td></tr>';
+      if (els.recentScansBody) els.recentScansBody.innerHTML = '<tr class="skeltrow"><td colspan="4"><div class="skelbar w85"></div></td></tr>';
       if (els.scansCards) els.scansCards.innerHTML = '<div class="skelcard"><div class="skelbar w65"></div><div class="skelbar w40"></div></div>';
       els.profilesGrid.innerHTML = '<div class="skelcard"><div class="skelbar w65"></div><div class="skelbar w40"></div><div class="skelbar w85"></div></div>' +
         '<div class="skelcard"><div class="skelbar w65"></div><div class="skelbar w40"></div><div class="skelbar w85"></div></div>';
     }
-    return Core.loadAll(creds.endpoint, creds.readKey)
-      .then(function (data) {
-        state.scans = data.scans;
-        state.profiles = data.profiles;
-        /* v81: refresh the research-frame count alongside the
-           main load; it resolves null on any failure and only
-           ever adds its stats card. */
-        Core.loadResearchCount(creds.endpoint, creds.adminKey).then(function (rc) {
-          state.research = rc;
-          if (rc) renderAll();
-        });
-        els.statusBanner.hidden = true;
-        if (els.lastUpdatedLine) els.lastUpdatedLine.textContent = 'Last updated ' + Core.fmtDhaka(Date.now());
-        renderAll();
-      })
-      .catch(function (err) {
-        /* v64: a failed cold load leaves no skeleton behind. */
-        if (!state.scans.length && !state.profiles.length) {
-          els.statsGrid.innerHTML = '';
-          els.profilesGrid.innerHTML = '';
-          if (els.banksTableBody) els.banksTableBody.innerHTML = '';
-          if (els.recentScansBody) els.recentScansBody.innerHTML = '';
+    /* v83: per-section independent loading. Each section applies
+       its own success; a failure degrades only that section (its
+       error box + its own retry) and never discards the other
+       section's data. The global banner appears only when BOTH
+       sections fail. Research loads independently alongside. */
+    loadResearch();
+    return Core.loadSections(creds.endpoint, creds.readKey)
+      .then(function (res) {
+        var failed = [];
+        if (res.scans.ok) { state.scans = res.scans.scans; state.sectionErrors.scans = null; }
+        else { state.sectionErrors.scans = res.scans.error; failed.push(res.scans.error); }
+        if (res.profiles.ok) { state.profiles = res.profiles.profiles; state.sectionErrors.profiles = null; }
+        else { state.sectionErrors.profiles = res.profiles.error; failed.push(res.profiles.error); }
+        if (failed.length < 2) {
+          state.lastUpdatedTs = Date.now();
+          if (!isSilent) els.statusBanner.hidden = true;
+          stampFreshness();
+          /* v84: a silent tick re-renders ONLY when the data
+             actually changed — an unchanged tick changes nothing
+             on screen at all (the real-time feeling he asked for). */
+          var sig = dataSignature();
+          if (!isSilent || sig !== state.dataSig) { state.dataSig = sig; renderAll(); }
+        } else {
+          if (isSilent) {
+            /* v84: a silent failure keeps the screen as it is. */
+            if (failed[0] && failed[0].status === 401) stopAutoRefresh();
+          } else if (!state.scans.length && !state.profiles.length) {
+            els.statsGrid.innerHTML = '';
+            els.profilesGrid.innerHTML = '';
+            if (els.banksTableBody) els.banksTableBody.innerHTML = '';
+            if (els.recentScansBody) els.recentScansBody.innerHTML = '';
+            showError(failed[0]);
+            if (failed[0] && failed[0].status === 401) stopAutoRefresh();
+          } else { renderAll(); showError(failed[0]); if (failed[0] && failed[0].status === 401) stopAutoRefresh(); }
         }
-        showError(err);
-        if (err && err.status === 401) stopAutoRefresh();
       })
       .then(function () {
         state.loading = false;
-        els.refreshBtn.disabled = false;
+        if (!isSilent) els.refreshBtn.disabled = false;
+      });
+  }
+
+  /* v83: one section's own retry — refetches ONLY that endpoint
+     and re-renders; the other section is untouched. */
+  function refreshSection(section) {
+    var creds = sessionCreds;
+    if (!creds) return Promise.resolve();
+    var path = section === 'profiles' ? '/api/profiles?summary=1' : '/api/scans';
+    return Core.fetchJson(creds.endpoint, creds.readKey, path)
+      .then(function (j) {
+        if (section === 'profiles') { state.profiles = Array.isArray(j.profiles) ? j.profiles : []; state.sectionErrors.profiles = null; }
+        else { state.scans = Array.isArray(j.scans) ? j.scans : []; state.sectionErrors.scans = null; }
+        state.lastUpdatedTs = Date.now();
+        stampFreshness();
+        renderAll();
+      })
+      .catch(function (err) {
+        if (section === 'profiles') state.sectionErrors.profiles = err; else state.sectionErrors.scans = err;
+        renderSectionErrors();
       });
   }
 
   function startAutoRefresh() {
     stopAutoRefresh();
-    state.timer = window.setInterval(refresh, 30000);
+    state.timer = window.setInterval(function () { refresh(true); }, 30000);
   }
 
   function stopAutoRefresh() {
@@ -1349,7 +1627,19 @@
       window.clearInterval(state.timer);
       state.timer = null;
     }
-    if (els.autoRefreshToggle) els.autoRefreshToggle.checked = false;
+    /* v83: stopping the TIMER (lock, disconnect, 401) no longer
+       touches the toggle — the toggle mirrors the persisted
+       preference, which survives lock/unlock by design. */
+  }
+
+  /* v83: apply the persisted auto-refresh preference when the
+     dashboard opens. Default ON when nothing is stored. */
+  function applyAutoRefreshPref() {
+    if (!els.autoRefreshToggle) return;
+    var on = Core.readAutoRefreshPref(window.localStorage);
+    els.autoRefreshToggle.checked = on;
+    if (on && sessionCreds) startAutoRefresh();
+    stampFreshness();
   }
 
   /* v73 (Seat 1 dashboard F4): locking or disconnecting must
@@ -1451,10 +1741,7 @@
           : 'Done — no stored bundles were found for that research code, so nothing was removed.';
         renderResearchDelete();
         /* keep the Overview research count honest after a delete */
-        Core.loadResearchCount(sessionCreds.endpoint, sessionCreds.adminKey).then(function (rc) {
-          state.research = rc;
-          renderAll();
-        });
+        loadResearch();
       })
       .catch(function (err) {
         researchUi.busy = false;
@@ -1499,7 +1786,7 @@
      'lastUpdatedLine', 'profileSearchInput', 'profileStatusFilter', 'banksTableBody', 'banksEmpty',
      'recentScansBody', 'recentScansEmpty', 'vaultHealth', 'scansCards', 'bankDrawer', 'bankDrawerBody',
      'bankDrawerCloseBtn', 'viewAllScansBtn', 'sidebarCollapseBtn', 'filterToggleBtn', 'scanFilterBar',
-     'overviewSection', 'banksSection', 'scansSection'
+     'overviewSection', 'banksSection', 'scansSection', 'researchBody', 'researchSection', 'scansError', 'profilesError', 'globalSearchResults', 'banksPager', 'scansPager', 'adminLogNavLink', 'bottomAdminLogLink', 'bottomResearchLink', 'researchNavLink'
     ].forEach(function (id) { els[id] = $(id); });
 
     /* v78: Settings navigation. From the first-run notice the
@@ -1930,14 +2217,53 @@
       showFirstRun('fresh');
     });
 
-    els.refreshBtn.addEventListener('click', refresh);
+    els.refreshBtn.addEventListener('click', function () { refresh(false); });
     els.disconnectBtn.addEventListener('click', disconnect);
     els.lockBtn.addEventListener('click', lock);
     els.reenterBtn.addEventListener('click', disconnect);
     els.autoRefreshToggle.addEventListener('change', function () {
+      /* v83: the choice PERSISTS (its own storage key) across
+         lock/unlock and visits; default is ON. */
+      Core.writeAutoRefreshPref(window.localStorage, els.autoRefreshToggle.checked);
       if (els.autoRefreshToggle.checked) { startAutoRefresh(); refresh(); }
-      else stopAutoRefresh();
+      else { stopAutoRefresh(); stampFreshness(); }
     });
+    /* v83: per-section retry + research retry (delegated). */
+    if (els.mainView) {
+      els.mainView.addEventListener('click', function (ev) {
+        var t = ev.target.closest ? ev.target.closest('[data-retry-section],[data-action="research-retry"]') : null;
+        if (!t) return;
+        var sec = t.getAttribute('data-retry-section');
+        if (sec) refreshSection(sec);
+        else loadResearch();
+      });
+      els.mainView.addEventListener('click', function (ev) {
+        var hit = ev.target.closest ? ev.target.closest('.global-hit') : null;
+        if (!hit) return;
+        var id = hit.getAttribute('data-biom-id');
+        var match = null;
+        state.profiles.forEach(function (p) { if (String(p.biomId || '') === id) match = p; });
+        openBankDrawer(match);
+      });
+    }
+    if (els.mainView) {
+      els.mainView.addEventListener('click', function (ev) {
+        var bp = ev.target.closest ? ev.target.closest('[data-bank-page]') : null;
+        if (bp && !bp.disabled) { state.bankPage += bp.getAttribute('data-bank-page') === 'next' ? 1 : -1; renderAll(); return; }
+        var sp = ev.target.closest ? ev.target.closest('[data-scan-page]') : null;
+        if (sp && !sp.disabled) { state.scanPage += sp.getAttribute('data-scan-page') === 'next' ? 1 : -1; renderAll(); }
+      });
+    }
+    /* v83: Admin Log nav (sidebar + bottom nav) opens Settings
+       in manage mode, scrolled to the Admin activity card. */
+    function openAdminLogFromNav(ev) {
+      ev.preventDefault();
+      if (!sessionCreds) return;
+      showSettings('manage');
+      if (els.adminActivityCard) els.adminActivityCard.scrollIntoView();
+    }
+    if (els.adminLogNavLink) els.adminLogNavLink.addEventListener('click', openAdminLogFromNav);
+    if (els.bottomAdminLogLink) els.bottomAdminLogLink.addEventListener('click', openAdminLogFromNav);
     ['kindFilter', 'resultFilter'].forEach(function (id) {
       els[id].addEventListener('change', renderAll);
     });

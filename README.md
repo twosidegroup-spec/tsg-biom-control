@@ -13,6 +13,18 @@ It shows, in one place, everything your devices sync to your own TSG Biom API:
   card with its deletion time, and the Overview count covers live banks only.
   Template and embedding *contents* are never displayed — counts only.
 
+**v83 (Phase 2 rebuild):** Job-named navigation (Overview, People, Research Frames,
+Admin Log, Settings) with one global search across name / palm code / IP / Biom ID;
+per-section independent loading (a failing endpoint degrades only its own section,
+with its own retry); the Research Frames section always renders an explanatory
+state and never vanishes silently; auto-refresh is ON by default, shows a visible
+Live/Stale freshness line, and its preference persists across lock/unlock; the
+lock/setup screens explain in plain words that keys are stored per web address.
+Phase 1 §K design tokens (single blue ramp, blue-tinted neutrals, 4 semantic
+colours, Inter/system sans + mono for IDs). The credential seal format is
+unchanged from v63–v82 — an existing seal opens byte-compatibly (proven by a
+v82-format fixture test under the dashboard password).
+
 **v82 (Phase 6):** Settings → Admin activity gains the research-frame withdrawal
 control — enter an anonymous research code, confirm, and every stored research
 bundle for that code is deleted via `POST /api/admin/research-delete` (the v81

@@ -13,6 +13,7 @@
      talks to. -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; script-src-attr 'none'; connect-src https://tsg-biom-api.vercel.app; style-src 'self'; img-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; worker-src 'none'; media-src 'none'; frame-src 'none'; manifest-src 'none'">
 <meta name="referrer" content="no-referrer">
+<!-- TSG Biom Control dashboard v83 (Phase 2 rebuild) -->
 <title>TSG Biom Control — TwoSide Group</title>
 <meta name="description" content="Control dashboard for the TSG BIOM palm biometric system. Shows the scan records and palm banks your devices sync to your own TSG Biom API.">
 <link rel="stylesheet" href="styles.css">
@@ -32,8 +33,9 @@
     </div>
     <nav class="side-nav" aria-label="Sections">
       <a class="side-nav-link" href="#overviewSection"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.8"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.8"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.8"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.8"/></svg><span>Overview</span></a>
-      <a class="side-nav-link" href="#banksSection"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"/><path d="M9.3 12.1a2.8 2.8 0 1 1 .7 2.3"/><path d="M12 12.3v1.9"/></svg><span>Palm Banks</span></a>
-      <a class="side-nav-link" href="#scansSection"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M8.5 6h11M8.5 12h11M8.5 18h11"/><circle cx="4.4" cy="6" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.4" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.4" cy="18" r="1.2" fill="currentColor" stroke="none"/></svg><span>Scan Log</span></a>
+      <a class="side-nav-link" href="#banksSection"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"/><path d="M9.3 12.1a2.8 2.8 0 1 1 .7 2.3"/><path d="M12 12.3v1.9"/></svg><span>People</span></a>
+      <a class="side-nav-link" href="#researchSection" id="researchNavLink"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 10h16M10 10v10"/></svg><span>Research Frames</span></a>
+      <a class="side-nav-link" href="#" id="adminLogNavLink"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M8.5 6h11M8.5 12h11M8.5 18h11"/><circle cx="4.4" cy="6" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.4" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.4" cy="18" r="1.2" fill="currentColor" stroke="none"/></svg><span>Admin Log</span></a>
       <a class="side-nav-link" href="#" id="settingsNavLink"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="3.1"/><path d="M12 3v2.6M12 18.4V21M3 12h2.6M18.4 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8"/></svg><span>Settings</span></a>
     </nav>
     <div class="session-block">
@@ -41,7 +43,7 @@
         <span class="endpoint-chip" id="endpointChip" title="Connected API endpoint"></span>
         <label class="auto-toggle">
           <input type="checkbox" id="autoRefreshToggle">
-          <span>Auto-refresh 30s</span>
+          <span>Auto-refresh 30s (on by default)</span>
         </label>
         <button type="button" class="btn btn-light" id="refreshBtn">Refresh</button>
         <button type="button" class="btn btn-ghost" id="lockBtn">Lock</button>
@@ -81,6 +83,14 @@
         The read key on this browser is stored sealed — encrypted under your password —
         never in plain text. <button type="button" class="linklike" id="lockResetBtn">Forget the sealed key on this browser</button>
       </p>
+      <p class="fineprint seal-origin-note">
+        <strong>Why a password can fail on the other web address:</strong> your keys are saved
+        <strong>per web address</strong>. If you set up on one address (for example the GitHub Pages
+        address), that setup does <strong>not</strong> carry to the other address (the Vercel one) —
+        each address keeps its own sealed copy. If this address says it is not set up, or your
+        password does not open it, set up once on <strong>this</strong> address and it will work here
+        from then on.
+      </p>
       </div>
     </div>
   </section>
@@ -102,6 +112,12 @@
         This browser still holds your read key from an earlier version, stored in plain text.
         Open Settings to protect it with your dashboard password — the plain-text copy is
         deleted the moment the seal is written.
+      </p>
+      <p class="muted seal-origin-note">
+        <strong>Setting up on more than one web address?</strong> Your keys are saved
+        <strong>per web address</strong>: setting up on the GitHub Pages address does not carry to
+        the Vercel address, or the other way round. Set up once on each address you use — after
+        that, each one asks only for your password.
       </p>
       <button type="button" class="btn btn-primary" id="firstRunSettingsBtn">Open Settings</button>
     </div>
@@ -171,6 +187,8 @@
         <p class="fineprint">
           The endpoint and keys are stored only in this browser, sealed — encrypted under your
           dashboard password (AES-GCM, PBKDF2) — never in plain text, and sent only to your API.
+          They are saved <strong>per web address</strong>: a setup made on the GitHub Pages address
+          does not appear on the Vercel address — set up on the address you are using now.
           Disconnect clears them. Palm template contents are never displayed here.
           This build's security policy allows connections to the TSG Biom API only.
         </p>
@@ -217,12 +235,14 @@
     <!-- Shell top bar: the existing scan search, promoted into the shell -->
     <div class="shell-topbar">
       <label class="field field-inline field-grow shell-search">
-        <span>Search scans</span>
-        <input type="search" id="searchInput" placeholder="Search name or Biom ID&hellip;" spellcheck="false">
+        <span>Search everything</span>
+        <input type="search" id="searchInput" placeholder="Name, palm code, IP or Biom ID&hellip;" spellcheck="false">
       </label>
       <p class="last-updated num" id="lastUpdatedLine" aria-live="off"></p>
       <button type="button" class="btn btn-light filter-toggle" id="filterToggleBtn" aria-expanded="false">Filters</button>
     </div>
+
+    <section class="card panel global-results" id="globalSearchResults" hidden aria-label="People matching the search"></section>
 
     <div class="banner banner-error" id="errorBanner" role="alert" hidden>
       <p id="errorText"></p>
@@ -240,7 +260,7 @@
       <div class="overview-panels">
         <div class="card panel recent-panel">
           <div class="panel-head">
-            <h3>Recent scans</h3>
+            <h3>Recent activity</h3>
             <button type="button" class="linklike" id="viewAllScansBtn">View all</button>
           </div>
           <div class="table-wrap table-wrap-plain">
@@ -249,13 +269,14 @@
                 <tr>
                   <th scope="col">Time (Dhaka)</th>
                   <th scope="col">Profile</th>
+                  <th scope="col">Activity</th>
                   <th scope="col">Result</th>
                 </tr>
               </thead>
               <tbody id="recentScansBody"></tbody>
             </table>
           </div>
-          <p class="empty-note" id="recentScansEmpty" hidden>No scan records yet. Records appear here after the phone syncs.</p>
+          <p class="empty-note" id="recentScansEmpty" hidden>No activity yet — when someone registers a palm, strengthens it or pays with Biom Pay, it shows here as soon as their phone syncs.</p>
         </div>
         <div class="card panel vault-panel">
           <div class="panel-head"><h3>Vault health</h3></div>
@@ -266,7 +287,8 @@
 
     <!-- Palm Banks -->
     <section aria-labelledby="profilesHeading" id="banksSection">
-      <h2 class="section-title" id="profilesHeading">Palm Banks</h2>
+      <h2 class="section-title" id="profilesHeading">People</h2>
+      <div id="profilesError"></div>
       <div class="filter-bar banks-toolbar">
         <label class="field field-inline field-grow">
           <span>Search palm banks</span>
@@ -287,9 +309,10 @@
             <tr>
               <th scope="col"><button type="button" class="sort-btn" data-sort="biomId">Biom ID</button></th>
               <th scope="col"><button type="button" class="sort-btn" data-sort="name">Name</button></th>
+              <th scope="col">Palm code</th>
               <th scope="col"><button type="button" class="sort-btn" data-sort="hand">Hand</button></th>
-              <th scope="col"><button type="button" class="sort-btn" data-sort="edccCount">EDCC templates</button></th>
-              <th scope="col"><button type="button" class="sort-btn" data-sort="neuralCount">PalmNet templates</button></th>
+              <th scope="col"><button type="button" class="sort-btn" data-sort="edccCount">Pattern templates</button></th>
+              <th scope="col"><button type="button" class="sort-btn" data-sort="neuralCount">AI templates</button></th>
               <th scope="col"><button type="button" class="sort-btn" data-sort="version">Version</button></th>
               <th scope="col"><button type="button" class="sort-btn" data-sort="status">Status</button></th>
             </tr>
@@ -298,8 +321,16 @@
         </table>
       </div>
       <div class="profiles" id="profilesGrid"></div>
-      <p class="empty-note" id="profilesEmpty" hidden>No palm profiles have synced yet. Profiles appear here after a device enrols a palm and syncs its bank.</p>
-      <p class="empty-note" id="banksEmpty" hidden>No palm banks match the current search or status filter.</p>
+      <div class="pager" id="banksPager"></div>
+      <p class="empty-note" id="profilesEmpty" hidden>No people enrolled yet — enrolments will appear here. What happens next: when a device enrols a palm and syncs its bank, that person shows up in this list.</p>
+      <p class="empty-note" id="banksEmpty" hidden>No people match the current search or status filter. Next: clear the search above, or set Status back to All statuses.</p>
+    </section>
+
+    <!-- Research Frames (v83: its own section; NEVER absent —
+         renderResearchCardHtml always explains its state) -->
+    <section aria-labelledby="researchHeading" id="researchSection">
+      <h2 class="section-title" id="researchHeading">Research Frames</h2>
+      <div class="card panel" id="researchBody"></div>
     </section>
 
     <!-- Scan Log -->
@@ -322,6 +353,7 @@
         </label>
       </div>
 
+      <div id="scansError"></div>
       <p class="count-line" id="scanCountLine" aria-live="polite"></p>
 
       <div class="table-wrap scans-table-wrap">
@@ -343,7 +375,8 @@
         </table>
       </div>
       <div class="scan-cards" id="scansCards"></div>
-      <p class="empty-note" id="scansEmpty" hidden>No scan records match. Records appear here after the phone syncs.</p>
+      <div class="pager" id="scansPager"></div>
+      <p class="empty-note" id="scansEmpty" hidden>No scan records match. If you were expecting a scan: records appear here after the phone syncs — check the Kind and Result filters above, or clear the search.</p>
     </section>
 
   </section>
@@ -368,8 +401,9 @@
 <!-- ============ BOTTOM NAV (mobile) ============ -->
 <nav class="bottom-nav" aria-label="Sections">
   <a class="bottom-nav-link" href="#overviewSection"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.8"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.8"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.8"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.8"/></svg><span>Overview</span></a>
-  <a class="bottom-nav-link" href="#banksSection"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"/><path d="M9.3 12.1a2.8 2.8 0 1 1 .7 2.3"/><path d="M12 12.3v1.9"/></svg><span>Banks</span></a>
-  <a class="bottom-nav-link" href="#scansSection"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M8.5 6h11M8.5 12h11M8.5 18h11"/><circle cx="4.4" cy="6" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.4" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.4" cy="18" r="1.2" fill="currentColor" stroke="none"/></svg><span>Scans</span></a>
+  <a class="bottom-nav-link" href="#banksSection"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"/><path d="M9.3 12.1a2.8 2.8 0 1 1 .7 2.3"/><path d="M12 12.3v1.9"/></svg><span>People</span></a>
+  <a class="bottom-nav-link" href="#researchSection" id="bottomResearchLink"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 10h16M10 10v10"/></svg><span>Research</span></a>
+  <a class="bottom-nav-link" href="#" id="bottomAdminLogLink"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M8.5 6h11M8.5 12h11M8.5 18h11"/><circle cx="4.4" cy="6" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.4" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.4" cy="18" r="1.2" fill="currentColor" stroke="none"/></svg><span>Admin Log</span></a>
   <a class="bottom-nav-link" href="#" id="bottomSettingsLink"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="3.1"/><path d="M12 3v2.6M12 18.4V21M3 12h2.6M18.4 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8"/></svg><span>Settings</span></a>
 </nav>
 

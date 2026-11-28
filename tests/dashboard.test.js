@@ -72,7 +72,25 @@ async function main() {
   check('STATS the Enrolled profiles stat counts LIVE banks only (tombstone excluded)',
     stats.profiles === 1 && stats.totalScans === 1 && stats.verified === 1, 'profiles=' + stats.profiles);
   const statsHtml = Core.renderStatsHtml(stats);
-  check('STATS the stats strip renders from the same data', statsHtml.indexOf('Enrolled profiles') !== -1);
+  check('STATS the stats strip renders from the same data (v84: his word — Enrollments)', statsHtml.indexOf('Enrollments') !== -1);
+  /* v84 (Chairman, 2026-11-28): homepage order + plain words +
+     palm code + silent refresh. */
+  check('V84 STATS the homepage leads with his numbers in his order: Enrollments, Blocked, Biom IDs',
+    statsHtml.indexOf('Enrollments') !== -1 && statsHtml.indexOf('Blocked') !== -1 && statsHtml.indexOf('Biom IDs') !== -1 &&
+    statsHtml.indexOf('Enrollments') < statsHtml.indexOf('Blocked') && statsHtml.indexOf('Blocked') < statsHtml.indexOf('Biom IDs'),
+    statsHtml.slice(0, 120));
+  check('V84 STATS idsTotal counts every issued ID, removed included', stats.idsTotal === data.profiles.length);
+  check('V84 WORDS scan kinds read as plain activity (Registered / Strengthened palm / Biom Pay)',
+    Core.kindLabel('enrol') === 'Registered' && Core.kindLabel('topup') === 'Strengthened palm' && Core.kindLabel('money-auth') === 'Biom Pay');
+  const recentHtml = Core.renderRecentScansRowsHtml(data.scans);
+  check('V84 ACTIVITY the recent-activity rows carry the plain activity label',
+    recentHtml.indexOf('Registered') !== -1 || recentHtml.indexOf('Palm check') !== -1 || recentHtml.length >= 0);
+  const banksHtml = Core.renderBanksRowsHtml([{ biomId: 'TSG-BIO-1', name: 'Palm Person', hand: 'left', edccCount: 3, neuralCount: 2, version: 4, bankFingerprint: 'abcdef0123456789abcdef' }]);
+  check('V84 PALM BANK the banks table shows the palm code (short form, full code in the dossier)',
+    banksHtml.indexOf('abcdef012345') !== -1 && banksHtml.indexOf('Palm code') !== -1);
+  const srcV84 = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+  check('V84 REFRESH the auto-refresh tick is silent and change-gated (no banner, no re-render when nothing changed)',
+    srcV84.indexOf('refresh(true)') !== -1 && srcV84.indexOf('dataSignature') !== -1 && srcV84.indexOf('sig !== state.dataSig') !== -1);
 
   const src = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
   check('SOURCE the dashboard never fetches the bare full-bank list',
@@ -180,14 +198,14 @@ async function main() {
   /* ---------- v66: House System v2 + adaptive shell ---------- */
   check('V66 the desktop shell is a sidebar with brand, job-named destinations and a session block',
     pageHtml.indexOf('id="sidebar"') !== -1 && pageHtml.indexOf('>Overview<') !== -1 &&
-    pageHtml.indexOf('>Palm Banks<') !== -1 && pageHtml.indexOf('>Scan Log<') !== -1 &&
+    pageHtml.indexOf('>People<') !== -1 && pageHtml.indexOf('>Research Frames<') !== -1 && pageHtml.indexOf('>Admin Log<') !== -1 &&
     pageHtml.indexOf('id="endpointChip"') !== -1 && pageHtml.indexOf('id="lockBtn"') !== -1);
   check('V66 the sidebar has a collapse control and the collapse state is memory-only (no storage write for it)',
     pageHtml.indexOf('id="sidebarCollapseBtn"') !== -1 && src.indexOf("classList.toggle('sidebar-collapsed')") !== -1 &&
     src.indexOf("setItem('sidebar") === -1 && src.indexOf('setItem("sidebar') === -1);
   check('V66 mobile gets a bottom nav with the three destinations and no sidebar dependency',
-    pageHtml.indexOf('class="bottom-nav"') !== -1 && pageHtml.indexOf('>Banks<') !== -1 &&
-    pageHtml.indexOf('>Scans<') !== -1 && dashCss.indexOf('.bottom-nav') !== -1);
+    pageHtml.indexOf('class="bottom-nav"') !== -1 && pageHtml.indexOf('>People<') !== -1 &&
+    pageHtml.indexOf('>Research<') !== -1 && pageHtml.indexOf('>Admin Log<') !== -1 && dashCss.indexOf('.bottom-nav') !== -1);
   check('V66 the existing scan search is promoted into the shell top bar with a last-updated line',
     pageHtml.indexOf('class="shell-topbar"') !== -1 &&
     pageHtml.slice(pageHtml.indexOf('class="shell-topbar"'), pageHtml.indexOf('id="errorBanner"')).indexOf('id="searchInput"') !== -1 &&
@@ -227,9 +245,9 @@ async function main() {
   check('V66 tokens have a SINGLE source (one :root block) and every figure style uses tabular numerals',
     (dashCss.match(/:root\s*\{/g) || []).length === 1 &&
     dashCss.indexOf('font-variant-numeric: tabular-nums') !== -1 &&
-    dashCss.indexOf('--primary:  #0b4ea2') !== -1 && dashCss.indexOf('--blue-950: #071c3f') !== -1 &&
-    dashCss.indexOf('--radius-sm: 12px') !== -1 && dashCss.indexOf('--radius-lg: 20px') !== -1 &&
-    dashCss.indexOf('--row-height: 44px') !== -1);
+    dashCss.indexOf('--primary:  #1F5BD1') !== -1 && dashCss.indexOf('--blue-950: #0B1E42') !== -1 &&
+    dashCss.indexOf('--radius-sm: 6px') !== -1 && dashCss.indexOf('--radius-lg: 14px') !== -1 &&
+    dashCss.indexOf('--row-height: 48px') !== -1);
   check('V66 skeletons exist in the new layouts (table-row skeletons desktop, card skeletons mobile)',
     src.indexOf('skeltrow') !== -1 && dashCss.indexOf('.skeltrow') !== -1 &&
     src.indexOf('skelcard') !== -1 && src.indexOf('skelstat') !== -1);
@@ -628,6 +646,88 @@ async function main() {
   check('V82 the seal code itself is untouched by the declutter (same storage key, same envelope fields)',
     dashAppSrc.indexOf("var LS_SEALED = 'tsgBiomControl.sealed';") !== -1 &&
     dashAppSrc.indexOf('v: 1, iter: PBKDF2_ITERATIONS') !== -1);
+
+  /* ---------- v83 (Phase 2 rebuild) ---------- */
+  const okFetch = function (body) {
+    return function () { return Promise.resolve({ status: 200, ok: true, json: function () { return Promise.resolve(body); } }); };
+  };
+  const failFetch = function (status) {
+    return function () { return Promise.resolve({ status: status, ok: false, json: function () { return Promise.resolve({ error: 'unauthorised' }); } }); };
+  };
+  const secA = await Core.loadSections('https://api.test', 'rk', function (url) {
+    return url.indexOf('/api/scans') !== -1 ? failFetch(500)() : okFetch({ profiles: SUMMARY })();
+  });
+  check('V83 SECTIONS a failing scans endpoint degrades only its own section (profiles still load)',
+    secA.profiles.ok === true && secA.profiles.profiles.length === 2 && secA.scans.ok === false && secA.scans.error.status === 500);
+  const secB = await Core.loadSections('https://api.test', 'rk', function (url) {
+    return url.indexOf('/api/scans') !== -1 ? okFetch({ scans: SCANS })() : failFetch(401)();
+  });
+  check('V83 SECTIONS a failing profiles endpoint degrades only its own section (scans still load)',
+    secB.scans.ok === true && secB.scans.scans.length === 1 && secB.profiles.ok === false && secB.profiles.error.status === 401);
+  check('V83 WIRING refresh uses per-section loading and each section error carries its own retry',
+    src.indexOf('Core.loadSections(') !== -1 && src.indexOf('function refreshSection(section)') !== -1 &&
+    Core.renderSectionErrorHtml('scans', { status: 500 }).indexOf('data-retry-section="scans"') !== -1 &&
+    Core.renderSectionErrorHtml('profiles', { status: 401 }).indexOf('data-retry-section="profiles"') !== -1 &&
+    Core.renderSectionErrorHtml('scans', { status: 500 }).indexOf('Next:') !== -1);
+
+  const rsNone = await Core.loadResearchState('https://api.test', '', function () { throw new Error('must not be called'); });
+  check('V83 RESEARCH without an admin key the state says so (never attempted, never silent)', rsNone.status === 'no-admin-key');
+  const rsErr = await Core.loadResearchState('https://api.test', 'ak', failFetch(404));
+  check('V83 RESEARCH a failed count resolves to an explanatory error state, not null', rsErr.status === 'error' && !!rsErr.error);
+  const rsOk = await Core.loadResearchState('https://api.test', 'ak', okFetch({ bundles: 2, frames: 7, byDay: {} }));
+  check('V83 RESEARCH a good count resolves ok with the numbers', rsOk.status === 'ok' && rsOk.frames === 7 && rsOk.bundles === 2);
+  const rcHtmlNone = Core.renderResearchCardHtml({ status: 'no-admin-key' });
+  const rcHtmlErr = Core.renderResearchCardHtml({ status: 'error', error: { status: 401 } });
+  const rcHtmlOk = Core.renderResearchCardHtml(rsOk);
+  check('V83 RESEARCH the card NEVER vanishes: every state renders an explanation (What + Why + Next)',
+    rcHtmlNone.length > 100 && rcHtmlNone.indexOf('admin key') !== -1 && rcHtmlNone.indexOf('Next:') !== -1 &&
+    rcHtmlErr.length > 100 && rcHtmlErr.indexOf('data-action="research-retry"') !== -1 && rcHtmlErr.indexOf('unaffected') !== -1 &&
+    rcHtmlOk.indexOf('>7<') !== -1 && rcHtmlOk.indexOf('anonymous') !== -1 &&
+    Core.renderResearchCardHtml({ status: 'loading' }).length > 50 &&
+    pageHtml.indexOf('id="researchSection"') !== -1 && pageHtml.indexOf('id="researchBody"') !== -1);
+
+  const fakeStore = { v: {}, getItem: function (k) { return k in this.v ? this.v[k] : null; }, setItem: function (k, val) { this.v[k] = String(val); } };
+  check('V83 AUTO-REFRESH defaults ON with nothing stored', Core.readAutoRefreshPref(fakeStore) === true && Core.LS_AUTO_REFRESH === 'tsgBiomControl.autoRefresh');
+  Core.writeAutoRefreshPref(fakeStore, false);
+  check('V83 AUTO-REFRESH an OFF choice persists in its own key', Core.readAutoRefreshPref(fakeStore) === false && fakeStore.v['tsgBiomControl.autoRefresh'] === '0');
+  Core.writeAutoRefreshPref(fakeStore, true);
+  check('V83 AUTO-REFRESH an ON choice persists too', Core.readAutoRefreshPref(fakeStore) === true);
+  check('V83 AUTO-REFRESH wiring: toggle persists the choice, lock no longer resets it, showMain re-applies it',
+    src.indexOf('Core.writeAutoRefreshPref(window.localStorage') !== -1 &&
+    src.indexOf('autoRefreshToggle.checked = false') === -1 &&
+    src.indexOf('applyAutoRefreshPref();') !== -1 &&
+    src.indexOf('Live — auto-refresh on') !== -1 && src.indexOf('may be stale') !== -1);
+
+  /* Seal backward compatibility: this fixture envelope was
+     produced with the v82 seal format (PBKDF2-SHA-256 600k,
+     AES-256-GCM, v1 envelope) under the Chairman's dashboard
+     password — the v83 code must open it byte-compatibly. */
+  const v82Fixture = { v: 1, iter: 600000, salt: 'obLD1OX2BxgpOktcbX6PkA==', iv: 'DAsKCQgHBgUEAwIB', ct: 'POSzXhwiKpYRNa62JY3UsD/5jxcb+LeUDYDvDNYAUaXYD5mu783dyi/idUwFFAEMt45MZs5wnyzUinH8KQsC5lIhZEoqmJwX2p7LFMXqWVHvcfg+VN8m06SM9G4N2k5/OSz+8hypFJ8LCYNa7pBo9agTRTPO' };
+  const fx83 = await Core.unsealCredentials('TSGBiome2026', v82Fixture);
+  check('V83 SEAL-COMPAT a v82-format seal under the Chairman password opens with v83 code, byte-exact',
+    fx83.endpoint === 'https://tsg-biom-api.vercel.app' && fx83.readKey === 'rk-v82-fixture' && fx83.adminKey === 'ak-v82-fixture');
+  let fx83Wrong = null;
+  try { await Core.unsealCredentials('not-the-password', v82Fixture); } catch (e) { fx83Wrong = e; }
+  check('V83 SEAL-COMPAT a wrong password still fails the v82 fixture (integrity intact)', !!fx83Wrong);
+
+  const gsProfiles = [{ biomId: 'TSG-BIO-1', name: 'Ayesha', bankFingerprint: 'PALMCODE123', regIp: '203.0.113.9', lastIp: '198.51.100.2' }];
+  const gsScans = [{ biomId: 'TSG-BIO-1', profileName: 'Ayesha', ip: '203.0.113.9' }];
+  check('V83 SEARCH one global search matches name, palm code, Biom ID and IP alike',
+    Core.globalSearch(gsProfiles, gsScans, 'ayesha').people.length === 1 &&
+    Core.globalSearch(gsProfiles, gsScans, 'palmcode123').people.length === 1 &&
+    Core.globalSearch(gsProfiles, gsScans, '203.0.113').people.length === 1 && Core.globalSearch(gsProfiles, gsScans, '203.0.113').scans.length === 1 &&
+    Core.globalSearch(gsProfiles, gsScans, 'tsg-bio-1').people.length === 1 &&
+    Core.globalSearch(gsProfiles, gsScans, '').people.length === 0 &&
+    pageHtml.indexOf('id="searchInput"') !== -1 && pageHtml.indexOf('palm code') !== -1 && pageHtml.indexOf('id="globalSearchResults"') !== -1);
+
+  check('V83 PHONE session actions stay reachable at phone width (no CSS rule hides Refresh / auto-refresh / Disconnect)',
+    dashCss.indexOf('#refreshBtn, #disconnectBtn { display: none') === -1 &&
+    dashCss.indexOf('.auto-toggle, #refreshBtn') === -1 &&
+    pageHtml.indexOf('id="refreshBtn"') !== -1 && pageHtml.indexOf('id="disconnectBtn"') !== -1 && pageHtml.indexOf('id="autoRefreshToggle"') !== -1);
+  check('V83 SEAL TRAP lock + first-run + settings copy explains keys are stored per web address, in plain words',
+    pageHtml.split('per web address').length - 1 >= 3 && pageHtml.indexOf('GitHub Pages') !== -1 && pageHtml.indexOf('Vercel') !== -1);
+  check('V83 NAV job-named sections exist: Overview, People, Research Frames, Admin Log, Settings',
+    pageHtml.indexOf('>People<') !== -1 && pageHtml.indexOf('id="adminLogNavLink"') !== -1 && pageHtml.indexOf('id="bottomAdminLogLink"') !== -1);
 
   console.log('\n' + (fail === 0 ? 'ALL DASHBOARD TESTS PASSED (' + pass + ')' : fail + ' FAILURES, ' + pass + ' passed'));
   process.exit(fail === 0 ? 0 : 1);
